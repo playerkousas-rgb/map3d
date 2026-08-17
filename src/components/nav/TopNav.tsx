@@ -1,16 +1,9 @@
-import { useCarStore } from "@/state/carStore";
 import { css } from "@emotion/react";
-import { DetailedHTMLProps, ButtonHTMLAttributes, useState } from "react";
-import { Modal } from "../modal/Modal";
-import { Column } from "../flex/Column";
-import { Title } from "../text/Title";
-import { Description } from "../text/Description";
+import { DetailedHTMLProps, ButtonHTMLAttributes } from "react";
+import { useI18n } from "@/i18n";
 
 const TOP_PANEL_HEIGHT = "3rem";
 const BORDER_COLOR = "#ededf290";
-
-const breakpoints = [768];
-const mq = breakpoints.map((bp) => `@media (max-width: ${bp}px)`);
 
 interface ButtonProps
   extends DetailedHTMLProps<
@@ -20,108 +13,69 @@ interface ButtonProps
   isShow?: boolean;
 }
 
-export function TopNav({ step }: { step: number }) {
-  const setThirdMode = useCarStore((state) => state.setThirdMode);
-  const thirdMode = useCarStore((state) => state.thirdMode);
-  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
-
-  const [openModal, setOpenModal] = useState(false);
+export function TopNav() {
+  const { t, toggleLang } = useI18n();
 
   return (
-    <>
+    <div
+      css={css({
+        display: "flex",
+        transition: ".5s",
+        transform: "translate(0px, 0px)",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: TOP_PANEL_HEIGHT,
+        backgroundColor: "#ffffff50",
+        backdropFilter: "blur(12px)",
+        borderBottom: `1px solid ${BORDER_COLOR}`,
+        zIndex: 9999,
+        justifyContent: "space-between",
+        alignItems: "center",
+      })}
+    >
       <div
         css={css({
-          display: "flex",
-          transition: ".5s",
-          transform: "translate(0px, 0px)",
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: TOP_PANEL_HEIGHT,
-          backgroundColor: "#ffffff50",
-          backdropFilter: "blur(12px)",
-          borderBottom: `1px solid ${BORDER_COLOR}`,
-          zIndex: 9999,
-          justifyContent: "space-between",
+          paddingLeft: "2rem",
           alignItems: "center",
+          flexDirection: "row",
+          display: "flex",
+          gap: "0.75rem",
         })}
       >
-        <div
+        <span
           css={css({
-            paddingLeft: "2rem",
-            alignItems: "center",
-            flexDirection: "row",
-            display: "flex",
-            gap: "0.75rem",
+            fontSize: "14px",
+            fontWeight: "600",
+            color: "#5b5d63",
           })}
         >
-          <span
-            css={css({
-              fontSize: "14px",
-              fontWeight: "600",
-              color: "#5b5d63",
-            })}
-          >
-            🗺️ Map3d
-          </span>
-        </div>
-
-        <div
-          css={css({
-            padding: "0rem 0rem",
-            [mq[0]]: {
-              display: "none",
-            },
-          })}
-        ></div>
-
-        <div
-          css={css({
-            paddingRight: "2rem",
-            display: "flex",
-            flexDirection: "row",
-            gap: "0.5rem",
-          })}
-        >
-          <NavButton
-            isShow={true}
-            onClick={() => window.open("https://github.com/cartesiancs/map3d")}
-          >
-            GitHub
-          </NavButton>
-          <NavButton isShow={step >= 1} onClick={() => setOpenModal(true)}>
-            Options
-          </NavButton>
-
-          {!isMobile && (
-            <>
-              {thirdMode ? (
-                <NavButton
-                  isShow={step == 2}
-                  onClick={() => setThirdMode(false)}
-                >
-                  Disable Car
-                </NavButton>
-              ) : (
-                <NavButton
-                  isShow={step == 2}
-                  onClick={() => setThirdMode(true)}
-                >
-                  Car Mode
-                </NavButton>
-              )}
-            </>
-          )}
-        </div>
+          {t("appName")}
+        </span>
       </div>
 
-      <Modal isOpen={openModal} onClose={() => setOpenModal(false)}>
-        <Column gap="0.5rem">
-          <Title>Options </Title>
-        </Column>
-      </Modal>
-    </>
+      <div
+        css={css({
+          paddingRight: "2rem",
+          display: "flex",
+          flexDirection: "row",
+          gap: "0.5rem",
+        })}
+      >
+        <NavButton isShow={true} onClick={toggleLang}>
+          {t("langToggle")}
+        </NavButton>
+        <NavButton
+          isShow={true}
+          onClick={() =>
+            window.open("https://github.com/playerkousas-rgb/map3d")
+          }
+        >
+          {t("github")}
+        </NavButton>
+      </div>
+    </div>
   );
 }
 

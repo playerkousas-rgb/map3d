@@ -1,5 +1,6 @@
 import { css, keyframes } from "@emotion/react";
 import { Loader2 } from "lucide-react";
+import { useI18n } from "@/i18n";
 
 export interface Building {
   id: number;
@@ -19,6 +20,7 @@ export function BuildingHeights({
   buildings: Building[];
   loading: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div
       css={css({
@@ -40,7 +42,7 @@ export function BuildingHeights({
             })}
             size={16}
           />
-          Fetching building information...
+          {t("fetchingBuildings")}
         </div>
       )}
       <ul
