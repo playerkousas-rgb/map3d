@@ -1,40 +1,49 @@
 <p align='center'>
 <h1 align='center'>🗺️ map3d</h1>
-<p align='center'>Generate a real world 3D map</p>
-</p>
-
-<p align='center'>
-<a href="https://map.fleet.im/">Visit Website</a> · <a href="https://github.com/cartesiancs/map3d/issues">Report Bugs</a>
+<p align='center'>Generate real-world 3D maps & 3D-printable GPX models / 生成真實世界 3D 地圖與可列印 GPX 模型</p>
 </p>
 
 ![img](./.github/screenshot.png)
 
 ## About The Project
 
-This is a 3D building mapping service implemented with [React-Three-Fiber](https://github.com/pmndrs/react-three-fiber). It allows exporting as a GLB file, and all features are free to use. Based on this project, various functionalities such as **digital twin**, **drone surveying**, and **GPS markers** can be implemented.
+A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react-three-fiber), merging the features of the original [cartesiancs/map3d](https://github.com/cartesiancs/map3d) and my earlier `building3d` project into one:
 
-The map files are based on OpenStreetMap data.
+**Mode 1 — Map → 3D Buildings（地圖 → 3D 建築）**
+
+- Select an area on the map (OpenStreetMap / Leaflet)
+- Fetch buildings & roads from the Overpass API
+- Render real-world 3D buildings (height from OSM `height` / `building:levels` tags)
+- Roads rendered as solid meshes with widths based on highway type
+- Click a building to see its OSM info (name, height, address, translations...)
+- A base plate is generated underneath so exports are 3D-printable
+
+**Mode 2 — GPX → 3D Print Model（GPX → 3D 列印模型）**
+
+- Import a hiking / cycling GPX track (drag & drop)
+- Generates a solid 3D model: base plate + track ribbon following the elevation profile, with start/end markers
+- Adjustable elevation exaggeration, track width and base thickness
+- Track statistics: distance, elevation gain, elevation range
+- One-click STL export, ready for slicing & printing
+
+**Export formats:** GLB / glTF / OBJ / STL
+
+**Bilingual UI:** English / 繁體中文 (toggle in the top bar)
 
 > [!IMPORTANT]
-> 📢 <strong>This project cannot guarantee the accuracy of the data.</strong> Since it uses OpenStreetMap data, some height values may be missing or incorrectly recorded. To address this issue, an option will be added in the future to allow users to manually correct the data.
+> 📢 <strong>This project cannot guarantee the accuracy of the data.</strong> Map data comes from OpenStreetMap; some building heights may be missing or incorrect.
 
-## Roadmap
+## Development
 
-- [x] Create 3D Buildings
-- [x] Create Roads
-- [x] Export GLB
-- [ ] Building Texture
-- [ ] Height Customization
-- [ ] Material
-- [ ] Heightmap
+```bash
+npm install
+npm run dev
+```
 
-## Demo
+## Credits
 
-https://github.com/user-attachments/assets/1b61c2f8-dcf9-40bb-9804-59f6a74594dc
-
-## Contributors
-
-Hyeong Jun Huh [(GitHub)](https://github.com/DipokalLab)
+- Original map3d project by [cartesiancs](https://github.com/cartesiancs/map3d) (MIT License), created by Hyeong Jun Huh [(GitHub)](https://github.com/DipokalLab)
+- Multi-format export & solid-mesh road ideas merged from my `building3d` project
 
 ## License
 

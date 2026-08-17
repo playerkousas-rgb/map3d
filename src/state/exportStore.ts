@@ -1,19 +1,24 @@
 import { create } from "zustand";
+import { ExportFormat } from "@/utils/exporters";
 
-type ActionStore = {
-  action: boolean;
-  fleetSpaceId: string;
-  exportType: "glb" | "fleet";
+type ExportStore = {
+  /** increments every time an export is requested */
+  requestId: number;
+  format: ExportFormat;
+  filename: string;
 
-  setAction: (action: boolean) => void;
-  setFleet: (fleetSpaceId: string, exportType: "glb" | "fleet") => void;
+  requestExport: (format: ExportFormat, filename?: string) => void;
 };
 
-export const useActionStore = create<ActionStore>((set) => ({
-  action: false,
-  fleetSpaceId: "",
-  exportType: "glb",
-  setAction: (action) => set(() => ({ action: action })),
-  setFleet: (fleetSpaceId, exportType) =>
-    set(() => ({ fleetSpaceId: fleetSpaceId, exportType: exportType })),
+export const useExportStore = create<ExportStore>((set) => ({
+  requestId: 0,
+  format: "glb",
+  filename: "map3d",
+
+  requestExport: (format, filename = "map3d") =>
+    set((state) => ({
+      requestId: state.requestId + 1,
+      format,
+      filename,
+    })),
 }));

@@ -15,12 +15,12 @@ export const useAreaStore = create<AreaStore>((set) => ({
   areas: [],
   center: [
     {
-      lat: 40.8,
-      lng: -73.95,
+      lat: 22.34,
+      lng: 114.15,
     },
     {
-      lat: 40.83,
-      lng: -73.88,
+      lat: 22.30,
+      lng: 114.20,
     },
   ],
   appendAreas: (areas) => set(() => ({ areas: [...areas] })),

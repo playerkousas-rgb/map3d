@@ -1,12 +1,11 @@
-import { useEffect, useState } from "react";
-import { Canvas, extend, ReactThreeFiber, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useState } from "react";
+import { Canvas } from "@react-three/fiber";
 import { useAreaStore } from "@/state/areaStore";
-import { Html, Sky, Environment, Line } from "@react-three/drei";
+import { Html, Sky, Environment, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { useActionStore } from "@/state/exportStore";
-import { GLTFExporter } from "three/examples/jsm/Addons.js";
-import Car from "./Car";
-import instanceFleet from "@/api/axios";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { ExportListener } from "./ExportListener";
+import { useI18n } from "@/i18n";
 
 const scale = 51000;
 
@@ -19,11 +18,21 @@ function Building({
   extrudeSettings: any;
   tags: any;
 }) {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [clicked, setClicked] = useState(false);
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [showTranslations, setShowTranslations] = useState(false);
   const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
+
+  const tagLabels: { [key: string]: string } = {
+    building: t("tagType"),
+    height: t("tagHeight"),
+    "building:levels": t("tagLevels"),
+    amenity: t("tagAmenity"),
+    denomination: t("tagDenomination"),
+  };
+
   return (
     <mesh
       onPointerOver={(e) => {
@@ -43,7 +52,7 @@ function Building({
         e.stopPropagation();
       }}
       rotation={[-Math.PI / 2, 0, 0]}
-      userData={{ exportToGLB: true }}
+      userData={{ exportable: true }}
     >
       <extrudeGeometry args={[shape, extrudeSettings]} />
       <meshStandardMaterial color={hovered || clicked ? "#007bff" : "#9da0a3"} />
@@ -51,7 +60,7 @@ function Building({
         <Html position={[hoverPos.x, hoverPos.y + extrudeSettings.depth + 0.5, hoverPos.z]} center>
           <div
             role="dialog"
-            aria-label={tags.name || "Building Information"}
+            aria-label={tags.name || t("buildingInfo")}
             style={{
               color: "#000000",
               backgroundColor: "#ffffff96",
@@ -75,7 +84,7 @@ function Building({
                 marginBottom: tags.name ? "8px" : "4px",
               }}
             >
-              {tags.name || "Building Information"}
+              {tags.name || t("buildingInfo")}
             </div>
             {["building", "height", "building:levels", "amenity", "denomination"].map(
               (key) =>
@@ -90,18 +99,7 @@ function Building({
                     }}
                   >
                     <span style={{ fontWeight: "500", color: "#5f6368" }}>
-                      {key === "building"
-                        ? "Type"
-                        : key === "height"
-                        ? "Height"
-                        : key === "building:levels"
-                        ? "Levels"
-                        : key === "amenity"
-                        ? "Facility"
-                        : key === "denomination"
-                        ? "Denomination"
-                        : key.replace(/_/g, " ")}
-                      :
+                      {tagLabels[key] || key.replace(/_/g, " ")}:
                     </span>
                     <span style={{ textTransform: "capitalize" }}>
                       {key === "height" ? `${tags[key]} m` : tags[key]}
@@ -124,7 +122,7 @@ function Building({
                 }}
               >
                 <div style={{ fontWeight: "500", marginBottom: "4px", color: "#5f6368" }}>
-                  Address
+                  {t("address")}
                 </div>
                 <div style={{ marginLeft: "4px", fontSize: "12px", color: "#5f6368" }}>
                   {[
@@ -172,7 +170,7 @@ function Building({
                   }}
                   onClick={() => setShowAdditionalInfo(!showAdditionalInfo)}
                 >
-                  Additional Information
+                  {t("additionalInfo")}
                   <span>{showAdditionalInfo ? "▲" : "▼"}</span>
                 </div>
                 {showAdditionalInfo && (
@@ -279,7 +277,7 @@ function Building({
                   }}
                   onClick={() => setShowTranslations(!showTranslations)}
                 >
-                  Name Translations
+                  {t("nameTranslations")}
                   <span>{showTranslations ? "▲" : "▼"}</span>
                 </div>
                 {showTranslations && (
@@ -312,19 +310,42 @@ function Building({
   );
 }
 
+/** Approximate road width in scene units by highway type (merged from building3d) */
+function roadWidth(tags: any): number {
+  const laneWidth = 1.6;
+  const lanes = parseFloat(tags?.lanes || "");
+  if (!isNaN(lanes) && lanes > 0) return lanes * laneWidth;
+  switch (tags?.highway) {
+    case "motorway":
+    case "trunk":
+      return 5;
+    case "primary":
+      return 4;
+    case "secondary":
+      return 3.2;
+    case "tertiary":
+      return 2.6;
+    case "residential":
+    case "unclassified":
+      return 2.2;
+    case "footway":
+    case "path":
+    case "cycleway":
+      return 1;
+    default:
+      return 1.8;
+  }
+}
+
+/**
+ * Roads rendered as solid meshes (instead of lines) so they can be
+ * exported to OBJ / STL as well — merged idea from building3d.
+ */
 function Roads({ area }: { area: any }) {
   const [roads, setRoads] = useState<any[]>([]);
-  if (!area || area.length < 2) return null;
-  const refLat = (area[1].lat + area[0].lat) / 2;
-  const refLng = (area[1].lng + area[0].lng) / 2;
-
-  function project(lat: number, lng: number) {
-    const x = (lng - refLng) * scale * Math.cos((refLat * Math.PI) / 180);
-    const y = (lat - refLat) * scale;
-    return new THREE.Vector2(x, y);
-  }
 
   useEffect(() => {
+    if (!area || area.length < 2) return;
     const south = area[1].lat;
     const west = area[1].lng;
     const north = area[0].lat;
@@ -337,106 +358,89 @@ function Roads({ area }: { area: any }) {
     })
       .then((response) => response.json())
       .then((data) => {
-        setRoads(data.elements);
+        setRoads(data.elements || []);
       })
       .catch((err) => console.error(err));
   }, [area]);
 
+  const geometry = useMemo(() => {
+    if (!area || area.length < 2 || roads.length === 0) return null;
+    const refLat = (area[1].lat + area[0].lat) / 2;
+    const refLng = (area[1].lng + area[0].lng) / 2;
+
+    const project = (lat: number, lng: number) => {
+      const x = (lng - refLng) * scale * Math.cos((refLat * Math.PI) / 180);
+      const z = -(lat - refLat) * scale;
+      return { x, z };
+    };
+
+    const parts: THREE.BufferGeometry[] = [];
+    const roadHeight = 0.4;
+
+    roads.forEach((road) => {
+      if (!road.geometry || road.geometry.length < 2) return;
+      const width = roadWidth(road.tags);
+
+      for (let i = 0; i < road.geometry.length - 1; i++) {
+        const a = project(road.geometry[i].lat, road.geometry[i].lon);
+        const b = project(road.geometry[i + 1].lat, road.geometry[i + 1].lon);
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 0.01) continue;
+
+        const seg = new THREE.BoxGeometry(length, roadHeight, width);
+        const angle = Math.atan2(dz, dx);
+        seg.rotateY(-angle);
+        seg.translate((a.x + b.x) / 2, roadHeight / 2, (a.z + b.z) / 2);
+        parts.push(seg);
+      }
+    });
+
+    if (parts.length === 0) return null;
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((p) => p.dispose());
+    return merged;
+  }, [roads, area]);
+
+  if (!geometry) return null;
+
   return (
-    <>
-      {roads.map((road, index) => {
-        if (!road.geometry || road.geometry.length < 2) return null;
-
-        const points = road.geometry.map((pt: any) => {
-          const v = project(pt.lat, pt.lon);
-          return new THREE.Vector3(v.x, 0.1, -v.y);
-        });
-
-        const lineGeometry: any = new THREE.BufferGeometry().setFromPoints(points);
-
-        return (
-          <Line
-            points={points}
-            color="#34f516"
-            lineWidth={1}
-            userData={{ exportToGLB: true }}
-          ></Line>
-        );
-      })}
-    </>
+    <mesh geometry={geometry} userData={{ exportable: true }}>
+      <meshStandardMaterial color="#4a5568" roughness={0.9} metalness={0.1} />
+    </mesh>
   );
 }
 
-export function Export() {
-  const { scene } = useThree();
-  const action = useActionStore((state) => state.action);
-  const fleetSpaceId = useActionStore((state) => state.fleetSpaceId);
+/** Base plate under the selected area — makes exported STL printable */
+function BasePlate({ area }: { area: any }) {
+  const geometry = useMemo(() => {
+    if (!area || area.length < 2) return null;
+    const refLat = (area[1].lat + area[0].lat) / 2;
+    const refLng = (area[1].lng + area[0].lng) / 2;
+    const cos = Math.cos((refLat * Math.PI) / 180);
 
-  const exportType = useActionStore((state) => state.exportType);
+    const x1 = (area[1].lng - refLng) * scale * cos;
+    const x2 = (area[0].lng - refLng) * scale * cos;
+    const z1 = -(area[1].lat - refLat) * scale;
+    const z2 = -(area[0].lat - refLat) * scale;
 
-  const setAction = useActionStore((state) => state.setAction);
+    const width = Math.abs(x2 - x1) + 8;
+    const depth = Math.abs(z2 - z1) + 8;
+    const thickness = 2;
 
-  useEffect(() => {
-    if (action === true) {
-      setAction(false);
-      exportGLB();
-    }
-  }, [action, setAction, scene]);
+    const geo = new THREE.BoxGeometry(width, thickness, depth);
+    geo.translate((x1 + x2) / 2, -thickness / 2, (z1 + z2) / 2);
+    return geo;
+  }, [area]);
 
-  const uploadFleet = async (blob) => {
-    const formData = new FormData();
+  if (!geometry) return null;
 
-    formData.append("object", blob, "box3d.glb");
-    formData.append("title", "New Object");
-    formData.append("description", "");
-    formData.append("spaceId", fleetSpaceId);
-
-    await instanceFleet.post("space/file/mesh", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
-  };
-
-  const exportGLB = () => {
-    const exportRoot = new THREE.Group();
-    scene.traverse((child) => {
-      if (child.userData?.exportToGLB === true) {
-        exportRoot.add(child.clone(true));
-      }
-    });
-    const exporter = new GLTFExporter();
-    const options = { binary: true, embedImages: true };
-    exporter.parse(
-      exportRoot,
-      (result) => {
-        if (result instanceof ArrayBuffer) {
-          const blob = new Blob([result], { type: "model/gltf-binary" });
-
-          if (exportType == "glb") {
-            const link = document.createElement("a");
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.href = URL.createObjectURL(blob);
-            link.download = "scene.glb";
-            link.click();
-            document.body.removeChild(link);
-          }
-
-          if (exportType == "fleet") {
-            uploadFleet(blob);
-          }
-        } else {
-          console.error("GLB export failed: unexpected result", result);
-        }
-      },
-      (error) => {
-        console.error("An error occurred during export", error);
-      },
-      options
-    );
-  };
-  return null;
+  return (
+    <mesh geometry={geometry} userData={{ exportable: true }} receiveShadow>
+      <meshStandardMaterial color="#e6e8eb" roughness={0.9} metalness={0.05} />
+    </mesh>
+  );
 }
 
 export function Space() {
@@ -497,10 +501,11 @@ export function Space() {
         />
       ))}
 
+      <BasePlate area={realCenter} />
       <Roads area={realCenter} />
       <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
-      <Car />
-      <Export />
+      <OrbitControls />
+      <ExportListener />
       <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
       <Environment preset="city" />
     </Canvas>
