@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Files Vercel never needs. The site is built from:
+#   index.html, src/, public/, package*.json, vite.config.ts, tsconfig*.json,
+#   vercel.json, scripts/   (never list those here — `npm run guard` checks it)
+# Only the Vite output (dist/, see vercel.json "outputDirectory") is served.
+# ---------------------------------------------------------------------------
+
+# VCS & dependencies (Vercel installs from package-lock.json)
+.git
+node_modules
+
+# Local build output & tool caches (rebuilt on Vercel)
+/dist
+/dist-ssr
+*.tsbuildinfo
+.vite
+.cache
+.eslintcache
+/coverage
+/.vercel
+
+# Logs, backups, temp files
+*.log
+/logs
+*.bak
+*.tmp
+*.temp
+*.old
+*.orig
+*.rej
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Test uploads / scratch data
+uploads/
+/tmp/
+/temp/
+
+# Repo-only docs, CI and screenshots (not part of the website)
+/.github/
+/docs/
+/README.md
+/LICENSE
+/eslint.config.js
+
+# Local-only env files (set env vars in the Vercel dashboard instead)
+.env*.local

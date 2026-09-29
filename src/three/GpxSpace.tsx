@@ -1,10 +1,11 @@
 import { useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, Sky } from "@react-three/drei";
+import { OrbitControls, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GpxPoint } from "@/utils/gpx";
 import { ExportListener } from "./ExportListener";
+import { SafeEnvironment } from "./SafeEnvironment";
 
 export interface GpxModelSettings {
   /** vertical exaggeration multiplier for elevation */
@@ -180,7 +181,7 @@ export function GpxSpace({
       <OrbitControls />
       <ExportListener />
       <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
-      <Environment preset="city" />
+      <SafeEnvironment preset="city" />
     </Canvas>
   );
 }

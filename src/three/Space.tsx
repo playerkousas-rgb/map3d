@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { useAreaStore } from "@/state/areaStore";
-import { Html, Sky, Environment, OrbitControls } from "@react-three/drei";
+import { Html, Sky, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { ExportListener } from "./ExportListener";
+import { SafeEnvironment } from "./SafeEnvironment";
+import { normalizeBBox, overpassQuery } from "@/utils/overpass";
 import { useI18n } from "@/i18n";
 
 const scale = 51000;
@@ -346,21 +348,17 @@ function Roads({ area }: { area: any }) {
 
   useEffect(() => {
     if (!area || area.length < 2) return;
-    const south = area[1].lat;
-    const west = area[1].lng;
-    const north = area[0].lat;
-    const east = area[0].lng;
+    const { south, west, north, east } = normalizeBBox(area[0], area[1]);
     const query = `[out:json][timeout:25];(way["highway"](${south},${west},${north},${east}););out body geom;`;
-    fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: query,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        setRoads(data.elements || []);
+    let stale = false;
+    overpassQuery(query)
+      .then((elements) => {
+        if (!stale) setRoads(elements);
       })
       .catch((err) => console.error(err));
+    return () => {
+      stale = true;
+    };
   }, [area]);
 
   const geometry = useMemo(() => {
@@ -445,7 +443,12 @@ function BasePlate({ area }: { area: any }) {
 
 export function Space() {
   const areas = useAreaStore((state) => state.areas);
+  const areasLoaded = useAreaStore((state) => state.areasLoaded);
   const [realCenter, setRealCenter] = useState<any>();
+  // Roads are only requested for an area whose buildings were fetched.
+  // (Previously the default area was queried on every page load — with an
+  // inverted bbox that made Overpass return 100k+ roads.)
+  const [roadsArea, setRoadsArea] = useState<any>();
   const center = useAreaStore((state) => state.center);
   const refLat = (center[1].lat + center[0].lat) / 2;
   const refLng = (center[1].lng + center[0].lng) / 2;
@@ -484,6 +487,7 @@ export function Space() {
 
   useEffect(() => {
     setRealCenter(center);
+    if (areasLoaded) setRoadsArea(center);
   }, [areas]);
 
   const buildingsData = areaData();
@@ -502,12 +506,12 @@ export function Space() {
       ))}
 
       <BasePlate area={realCenter} />
-      <Roads area={realCenter} />
+      <Roads area={roadsArea} />
       <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
       <OrbitControls />
       <ExportListener />
       <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
-      <Environment preset="city" />
+      <SafeEnvironment preset="city" />
     </Canvas>
   );
 }

@@ -23,3 +23,20 @@ dist-ssr
 *.sln
 *.sw?
 *.tsbuildinfo
+
+# Vercel CLI link / local build output
+.vercel
+
+# Backups, temp files & local test uploads (npm run clean removes them)
+*.bak
+*.tmp
+*.temp
+*.old
+*.orig
+*.rej
+*~
+uploads/
+
+# Tool caches
+.eslintcache
+coverage

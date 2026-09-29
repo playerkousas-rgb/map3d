@@ -10,6 +10,7 @@ import "leaflet/dist/leaflet.css";
 import { css } from "@emotion/react";
 import { CircleMinus, MousePointerClick } from "lucide-react";
 import { useI18n } from "@/i18n";
+import { MapSearch } from "./MapSearch";
 
 const IconSize = css({
   width: "14px",
@@ -132,6 +133,7 @@ export function MapComponent({
   const [isDrag, setIsDrag] = useState(true);
   const [bounds, setBounds] = useState<LatLngBounds | null>(null);
   const [drawBounds, setDrawBounds] = useState<LatLngBounds | null>(null);
+  const [map, setMap] = useState<L.Map | null>(null);
 
   const handleClickSwitchDrag = () => {
     setIsDrag(!isDrag);
@@ -222,7 +224,10 @@ export function MapComponent({
         </button>
       </div>
 
+      <MapSearch map={map} />
+
       <MapContainer
+        ref={setMap}
         center={[22.32, 114.17]}
         zoom={13}
         style={{
