@@ -28,7 +28,8 @@ export interface GpxTrack {
 
 const EARTH_RADIUS = 6371000;
 
-function haversine(a: GpxPoint, b: GpxPoint): number {
+/** Great-circle distance in meters. */
+export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const dLat = ((b.lat - a.lat) * Math.PI) / 180;
   const dLon = ((b.lon - a.lon) * Math.PI) / 180;
   const la1 = (a.lat * Math.PI) / 180;
@@ -72,21 +73,6 @@ export function parseGpx(xmlText: string): GpxTrack {
     }
   }
 
-  let distance = 0;
-  let gain = 0;
-  let minEle = Infinity;
-  let maxEle = -Infinity;
-  for (let i = 0; i < sampled.length; i++) {
-    const p = sampled[i];
-    minEle = Math.min(minEle, p.ele);
-    maxEle = Math.max(maxEle, p.ele);
-    if (i > 0) {
-      distance += haversine(sampled[i - 1], p);
-      const d = p.ele - sampled[i - 1].ele;
-      if (d > 0) gain += d;
-    }
-  }
-
   const nameEl =
     doc.querySelector("trk > name") ||
     doc.querySelector("rte > name") ||
@@ -94,14 +80,34 @@ export function parseGpx(xmlText: string): GpxTrack {
 
   return {
     points: sampled,
-    stats: {
-      name: nameEl?.textContent?.trim() || "GPX Track",
-      pointCount: sampled.length,
-      distanceKm: distance / 1000,
-      elevationGain: Math.round(gain),
-      minEle: minEle === Infinity ? 0 : Math.round(minEle),
-      maxEle: maxEle === -Infinity ? 0 : Math.round(maxEle),
-      hasElevation: maxEle > minEle,
-    },
+    stats: computeGpxStats(sampled, nameEl?.textContent?.trim() || "GPX Track"),
+  };
+}
+
+/** Distance / elevation statistics for a (already down-sampled) track. */
+export function computeGpxStats(points: GpxPoint[], name: string): GpxStats {
+  let distance = 0;
+  let gain = 0;
+  let minEle = Infinity;
+  let maxEle = -Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    minEle = Math.min(minEle, p.ele);
+    maxEle = Math.max(maxEle, p.ele);
+    if (i > 0) {
+      distance += haversine(points[i - 1], p);
+      const d = p.ele - points[i - 1].ele;
+      if (d > 0) gain += d;
+    }
+  }
+
+  return {
+    name,
+    pointCount: points.length,
+    distanceKm: distance / 1000,
+    elevationGain: Math.round(gain),
+    minEle: minEle === Infinity ? 0 : Math.round(minEle),
+    maxEle: maxEle === -Infinity ? 0 : Math.round(maxEle),
+    hasElevation: maxEle > minEle,
   };
 }

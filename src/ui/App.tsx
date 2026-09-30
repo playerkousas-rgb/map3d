@@ -28,9 +28,11 @@ import { useAreaStore } from "@/state/areaStore";
 import { useExportStore } from "@/state/exportStore";
 import { Modal } from "@/components/modal/Modal";
 import { TopNav } from "@/components/nav/TopNav";
-import { useI18n } from "@/i18n";
+import { useI18n, TranslationKey } from "@/i18n";
 import { parseGpx, GpxTrack } from "@/utils/gpx";
 import { ExportFormat } from "@/utils/exporters";
+import { normalizeBBox, overpassQuery } from "@/utils/overpass";
+import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
 
 const IconSize = css({
   width: "14px",
@@ -44,6 +46,9 @@ to { transform: rotate(360deg); }
 
 type View = "front" | "processing" | "map3d" | "gpx3d";
 type Mode = "map" | "gpx";
+
+/** Refuse absurdly large files before reading them into memory. */
+const MAX_GPX_BYTES = 50 * 1024 * 1024;
 
 const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: "glb", label: "GLB" },
@@ -66,6 +71,7 @@ function App() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [isFetchingBuildings, setIsFetchingBuildings] = useState(false);
   const [hasFetchedBuildings, setHasFetchedBuildings] = useState(false);
+  const [fetchError, setFetchError] = useState<TranslationKey | null>(null);
 
   // --- gpx mode state ---
   const [gpxTrack, setGpxTrack] = useState<GpxTrack | null>(null);
@@ -76,6 +82,10 @@ function App() {
     baseHeight: 4,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [elevLoading, setElevLoading] = useState(false);
+  const [elevError, setElevError] = useState(false);
+  const [elevSource, setElevSource] = useState<ElevationSource | null>(null);
+  const elevRequestRef = useRef(0);
 
   const setCenter = useAreaStore((state) => state.setCenter);
   const appendAreas = useAreaStore((state) => state.appendAreas);
@@ -93,6 +103,7 @@ function App() {
     setIsNextButtonDisabled(false);
     setBuildings([]);
     setHasFetchedBuildings(false);
+    setFetchError(null);
   };
 
   const handleRemove = () => {
@@ -100,24 +111,18 @@ function App() {
     setIsNextButtonDisabled(true);
     setBuildings([]);
     setHasFetchedBuildings(false);
+    setFetchError(null);
   };
 
   const requestBuildings = async () => {
     setIsFetchingBuildings(true);
+    setFetchError(null);
 
-    const south = areaData[1].lat;
-    const west = areaData[1].lng;
-    const north = areaData[0].lat;
-    const east = areaData[0].lng;
+    const { south, west, north, east } = normalizeBBox(areaData[0], areaData[1]);
     const query = `[out:json][timeout:25];(way["building"]( ${south},${west},${north},${east} );relation["building"]( ${south},${west},${north},${east} ););out body geom;`;
     try {
-      const response = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-      const data = await response.json();
-      const blds: Building[] = data.elements.map((element: any) => ({
+      const elements = await overpassQuery(query);
+      const blds: Building[] = elements.map((element: any) => ({
         id: element.id,
         tags: element.tags,
         geometry: element.geometry
@@ -129,6 +134,7 @@ function App() {
       setHasFetchedBuildings(true);
     } catch (error) {
       console.error("Error fetching building data:", error);
+      setFetchError("fetchFailed");
     } finally {
       setIsFetchingBuildings(false);
     }
@@ -158,12 +164,25 @@ function App() {
     else if (view === "gpx3d") {
       setView("front");
       setGpxTrack(null);
+      resetElevation();
     }
   };
 
   // --- GPX handling ---
+  const resetElevation = () => {
+    elevRequestRef.current++;
+    setElevLoading(false);
+    setElevError(false);
+    setElevSource(null);
+  };
+
   const handleGpxFile = async (file: File) => {
     setGpxError(null);
+    if (file.size > MAX_GPX_BYTES) {
+      setGpxError(t("gpxTooLarge"));
+      return;
+    }
+    resetElevation();
     try {
       const text = await file.text();
       const track = parseGpx(text);
@@ -175,6 +194,26 @@ function App() {
       } else {
         setGpxError(t("gpxParseError"));
       }
+    }
+  };
+
+  const handleFillElevation = async () => {
+    if (!gpxTrack || elevLoading) return;
+    const base = gpxTrack;
+    const id = ++elevRequestRef.current;
+    setElevLoading(true);
+    setElevError(false);
+    try {
+      const { track, source } = await fillTrackElevation(base);
+      if (id !== elevRequestRef.current) return;
+      setGpxTrack((current) => (current === base ? track : current));
+      setElevSource(source);
+    } catch (err) {
+      if (id !== elevRequestRef.current) return;
+      console.error("Elevation lookup failed:", err);
+      setElevError(true);
+    } finally {
+      if (id === elevRequestRef.current) setElevLoading(false);
     }
   };
 
@@ -286,6 +325,11 @@ function App() {
           <Column gap="0.5rem">
             <Title>{t("processingTitle")}</Title>
             <Description>{t("processingDesc")}</Description>
+            {fetchError && (
+              <div role="alert" css={css({ color: "#ef4444", fontSize: "13px" })}>
+                {t(fetchError)}
+              </div>
+            )}
             <BuildingHeights buildings={buildings} loading={isFetchingBuildings} />
           </Column>
         </Column>
@@ -395,6 +439,64 @@ function App() {
               value={`${gpxTrack.stats.minEle} ~ ${gpxTrack.stats.maxEle} m`}
             />
           </div>
+
+          {!gpxTrack.stats.hasElevation && (
+            <div
+              css={css({
+                marginBottom: "0.75rem",
+                padding: "0.6rem",
+                borderRadius: "8px",
+                backgroundColor: "#fff7e6",
+                color: "#8a5a00",
+                fontSize: "12px",
+              })}
+            >
+              <div css={css({ marginBottom: "0.5rem" })}>{t("gpxNoElevation")}</div>
+              <button
+                css={css({
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.4rem",
+                  padding: "0.45rem",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ffffff",
+                  color: "#007bff",
+                  outline: "#007bff55 solid 0.1rem",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "0.2s",
+                  ":hover": { backgroundColor: "#f0f6ff" },
+                  ":disabled": { cursor: "default", opacity: 0.7 },
+                })}
+                disabled={elevLoading}
+                onClick={handleFillElevation}
+              >
+                {elevLoading ? (
+                  <Loader2
+                    css={[IconSize, css({ animation: `${spinAnimation} 1s linear infinite` })]}
+                  />
+                ) : (
+                  <Mountain css={IconSize} />
+                )}
+                {elevLoading ? t("gpxFillingElevation") : t("gpxFillElevation")}
+              </button>
+              {elevError && (
+                <div role="alert" css={css({ color: "#ef4444", marginTop: "0.4rem" })}>
+                  {t("gpxElevationFailed")}
+                </div>
+              )}
+            </div>
+          )}
+
+          {elevSource && (
+            <div css={css({ color: "#80868b", fontSize: "11px", margin: "-0.4rem 0 0.75rem" })}>
+              {t("gpxElevationSource")} {elevSource}
+            </div>
+          )}
 
           <div css={css({ fontWeight: 600, marginBottom: "0.4rem" })}>{t("gpxSettings")}</div>
 

@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 type AreaStore = {
   areas: any;
+  /** true once buildings were fetched for a user-selected area */
+  areasLoaded: boolean;
   center: {
     lat: number;
     lng: number;
@@ -13,6 +15,7 @@ type AreaStore = {
 
 export const useAreaStore = create<AreaStore>((set) => ({
   areas: [],
+  areasLoaded: false,
   center: [
     {
       lat: 22.34,
@@ -23,6 +26,6 @@ export const useAreaStore = create<AreaStore>((set) => ({
       lng: 114.20,
     },
   ],
-  appendAreas: (areas) => set(() => ({ areas: [...areas] })),
+  appendAreas: (areas) => set(() => ({ areas: [...areas], areasLoaded: true })),
   setCenter: (center) => set(() => ({ center: [...center] })),
 }));

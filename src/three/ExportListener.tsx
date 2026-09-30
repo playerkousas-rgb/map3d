@@ -12,7 +12,9 @@ export function ExportListener() {
   const requestId = useExportStore((s) => s.requestId);
   const format = useExportStore((s) => s.format);
   const filename = useExportStore((s) => s.filename);
-  const handled = useRef(0);
+  // Start from the current request id: when a scene (re)mounts it must not
+  // replay an export that was requested for the previous scene.
+  const handled = useRef(useExportStore.getState().requestId);
 
   useEffect(() => {
     if (requestId === 0 || requestId === handled.current) return;

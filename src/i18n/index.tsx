@@ -40,6 +40,15 @@ const dict = {
     export: "Export",
     tooBigTitle: "The area is too big",
     tooBigDesc: "Do you want to proceed?",
+    fetchFailed:
+      "Couldn't load building data from OpenStreetMap (backup servers were tried too). Please click Next Step to retry in a moment, or select a smaller area.",
+
+    // Place search
+    searchPlaceholder: "Search a place or address…",
+    search: "Search",
+    searchClear: "Clear",
+    searchNoResults: "No matching places found.",
+    searchFailed: "Search is temporarily unavailable. Please try again later.",
 
     // Export
     exportTitle: "Export 3D Model",
@@ -72,6 +81,12 @@ const dict = {
     gpxExportStl: "Export STL (3D Print)",
     gpxParseError: "Failed to parse GPX file. Please check the file format.",
     gpxNoPoints: "No track points found in this GPX file.",
+    gpxTooLarge: "This file is too large (max 50 MB).",
+    gpxNoElevation: "This track has no elevation data, so the model will be flat.",
+    gpxFillElevation: "Fill in elevation from terrain data",
+    gpxFillingElevation: "Fetching elevation…",
+    gpxElevationFailed: "Couldn't fetch elevation data. Please try again later.",
+    gpxElevationSource: "Elevation data:",
   },
   zh: {
     appName: "🗺️ Map3d",
@@ -104,6 +119,15 @@ const dict = {
     export: "匯出",
     tooBigTitle: "選取範圍太大",
     tooBigDesc: "確定要繼續嗎？",
+    fetchFailed:
+      "未能從 OpenStreetMap 取得建築資料（已自動嘗試備用伺服器）。請稍後再按「下一步」重試，或縮小選取範圍。",
+
+    // Place search
+    searchPlaceholder: "搜尋地點或地址…",
+    search: "搜尋",
+    searchClear: "清除",
+    searchNoResults: "找不到相關地點。",
+    searchFailed: "搜尋服務暫時無法使用，請稍後再試。",
 
     // Export
     exportTitle: "匯出 3D 模型",
@@ -136,6 +160,12 @@ const dict = {
     gpxExportStl: "匯出 STL（3D 列印）",
     gpxParseError: "GPX 檔案解析失敗，請確認檔案格式。",
     gpxNoPoints: "這個 GPX 檔案裡找不到軌跡點。",
+    gpxTooLarge: "檔案太大（上限 50 MB）。",
+    gpxNoElevation: "這條軌跡沒有海拔資料，模型會是平的。",
+    gpxFillElevation: "用地形資料自動補回海拔",
+    gpxFillingElevation: "正在取得海拔資料…",
+    gpxElevationFailed: "未能取得海拔資料，請稍後再試。",
+    gpxElevationSource: "海拔資料來源：",
   },
 } as const;
 
@@ -153,11 +183,31 @@ const I18nContext = createContext<I18nContextType>({
   toggleLang: () => {},
 });
 
+const LANG_KEY = "map3d-lang";
+
+// localStorage throws (instead of returning null) when the browser blocks
+// site storage, e.g. "block all cookies" — never let that crash the app.
+function readSavedLang(): string | null {
+  try {
+    return localStorage.getItem(LANG_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLang(lang: Lang) {
+  try {
+    localStorage.setItem(LANG_KEY, lang);
+  } catch {
+    /* storage unavailable: language just isn't remembered */
+  }
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLang] = useState<Lang>(() => {
-    const saved = localStorage.getItem("map3d-lang");
+    const saved = readSavedLang();
     if (saved === "en" || saved === "zh") return saved;
-    return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+    return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
   });
 
   const t = useCallback((key: TranslationKey) => dict[lang][key], [lang]);
@@ -165,7 +215,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const toggleLang = useCallback(() => {
     setLang((prev) => {
       const next = prev === "en" ? "zh" : "en";
-      localStorage.setItem("map3d-lang", next);
+      saveLang(next);
       return next;
     });
   }, []);
