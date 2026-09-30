@@ -17,11 +17,10 @@ import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useCourseStore } from "@/state/courseStore";
-import { useSceneStore } from "@/state/sceneStore";
+import { sameArea, useSceneStore } from "@/state/sceneStore";
 import { useViewStore } from "@/state/viewStore";
 import { createProjection } from "@/utils/projection";
-import { fetchBuildings, fetchRoads, SceneBuilding, SceneRoad } from "@/utils/sceneData";
-import { fieldRange, fetchHeightField, heightAt, HeightField } from "@/utils/terrain";
+import { heightAt } from "@/utils/terrain";
 import { Ground } from "./Ground";
 import { CourseLayer } from "./CourseLayer";
 import { buildBuildingsGeometry, buildRoadsGeometry } from "./orthoGeometry";
@@ -75,87 +74,20 @@ interface SceneProps {
 }
 
 function Scene({ area, buildingsOn, roadsOn, exaggeration, layer, showGrid }: SceneProps) {
-  const setStatus = useSceneStore((state) => state.set);
-  const [buildings, setBuildings] = useState<SceneBuilding[]>([]);
-  const [roads, setRoads] = useState<SceneRoad[]>([]);
-  const [field, setField] = useState<HeightField | null>(null);
+  // Buildings, roads and terrain were fetched in the "get the 3D scene" step
+  // before this view opened; the scene only reads them. If the view is somehow
+  // reached with data for a different area (a refresh mid-flow), load it now.
+  const buildings = useSceneStore((state) => state.buildingData);
+  const roads = useSceneStore((state) => state.roadData);
+  const field = useSceneStore((state) => state.field);
+  const dataArea = useSceneStore((state) => state.dataArea);
+  const load = useSceneStore((state) => state.load);
 
   const projection = useMemo(() => createProjection(area), [area]);
 
-  // Reset the reported status whenever a new area is opened.
   useEffect(() => {
-    setStatus({
-      buildings: "loading",
-      roads: "loading",
-      terrain: "loading",
-      buildingCount: 0,
-      roadCount: 0,
-      groundTextured: false,
-    });
-    setBuildings([]);
-    setRoads([]);
-    setField(null);
-  }, [area, setStatus]);
-
-  useEffect(() => {
-    let stale = false;
-    fetchBuildings(area)
-      .then((result) => {
-        if (stale) return;
-        setBuildings(result);
-        setStatus({ buildings: "ready", buildingCount: result.length });
-      })
-      .catch((err) => {
-        if (stale) return;
-        console.error("[map3d] buildings failed:", err);
-        setStatus({ buildings: "error" });
-      });
-    return () => {
-      stale = true;
-    };
-  }, [area, setStatus]);
-
-  useEffect(() => {
-    let stale = false;
-    fetchRoads(area)
-      .then((result) => {
-        if (stale) return;
-        setRoads(result);
-        setStatus({ roads: "ready", roadCount: result.length });
-      })
-      .catch((err) => {
-        if (stale) return;
-        console.error("[map3d] roads failed:", err);
-        setStatus({ roads: "error" });
-      });
-    return () => {
-      stale = true;
-    };
-  }, [area, setStatus]);
-
-  useEffect(() => {
-    let stale = false;
-    fetchHeightField(area)
-      .then((result) => {
-        if (stale) return;
-        setField(result);
-        const range = fieldRange(result);
-        setStatus({
-          terrain: "ready",
-          terrainMin: Math.round(range.min),
-          terrainMax: Math.round(range.max),
-          terrainSource: result.source,
-        });
-      })
-      .catch((err) => {
-        if (stale) return;
-        console.warn("[map3d] terrain failed:", err);
-        setStatus({ terrain: "error" });
-      });
-    return () => {
-      stale = true;
-    };
-  }, [area, setStatus]);
+    if (!sameArea(dataArea, area)) load(area);
+  }, [area, dataArea, load]);
 
   const groundAt = useCallback(
     (at: LatLng) => heightAt(field, at) * exaggeration,

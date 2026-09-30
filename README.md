@@ -31,7 +31,7 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 
 **Mode 3 — 3D City Orienteering（3D 城市定向 · 手機優先）**
 
-- Pick the course area on the map, then work in a 3D view of the real city
+- Three steps like the building mode: ① circle the course area on the map → ② get the 3D scene (buildings, roads and terrain load with a visible status and per-item retry) → ③ place the controls in the 3D city
 - Checkpoints are drawn as the orienteering symbols — △ start, ○ control (with its number), ◎ finish — standing on the terrain, with the course line between them
 - Place by tapping the ground, drag a marker to move it, tap it to delete; each control carries a code, name, clue and score
 - Live leg information in the HM20C grid-reference style used on paper: `50Q KK 0834 6805`, 6-figure `KK 083 680`, planar leg distance and grid **and** magnetic bearing (3.1°W)

@@ -3,6 +3,8 @@ import { Space } from "../three/Space";
 import { OrthoSpace } from "../three/OrthoSpace";
 import { CoursePanel } from "../components/orienteering/CoursePanel";
 import { OrthoOverlay } from "../components/orienteering/OrthoOverlay";
+import { OrthoProcessing } from "../components/orienteering/OrthoProcessing";
+import { isSceneSettled, useSceneStore } from "@/state/sceneStore";
 import { useCourseStore } from "@/state/courseStore";
 import { GpxSpace, GpxModelSettings } from "../three/GpxSpace";
 import { FullscreenModal } from "../components/FullscreenModal";
@@ -51,7 +53,7 @@ from { transform: rotate(0deg); }
 to { transform: rotate(360deg); }
 `;
 
-type View = "front" | "processing" | "map3d" | "gpx3d" | "ortho3d";
+type View = "front" | "processing" | "map3d" | "gpx3d" | "orthoProcessing" | "ortho3d";
 type Mode = "map" | "gpx" | "ortho";
 
 /** Refuse absurdly large files before reading them into memory. */
@@ -86,6 +88,10 @@ function App() {
   const orthoControls = useCourseStore((state) => state.course.controls.length);
   const orthoFileRef = useRef<HTMLInputElement>(null);
   const [orthoError, setOrthoError] = useState(false);
+  const loadOrthoScene = useSceneStore((state) => state.load);
+  const orthoBuildingsState = useSceneStore((state) => state.buildings);
+  const orthoBuildingCount = useSceneStore((state) => state.buildingCount);
+  const orthoSettled = useSceneStore((state) => isSceneSettled(state));
 
   // --- gpx mode state ---
   const [gpxTrack, setGpxTrack] = useState<GpxTrack | null>(null);
@@ -173,13 +179,31 @@ function App() {
     }
   };
 
-  const handleOpenOrtho3d = () => {
+  // Step ② of the orienteering flow: fetch the 3D scene (buildings, roads,
+  // terrain) first, then step ③ opens the city and the controls get placed.
+  const handleFetchOrthoScene = () => {
     if (areaData.length < 2) return;
-    setOrthoArea([
+    const area: [{ lat: number; lng: number }, { lat: number; lng: number }] = [
       { lat: areaData[0].lat, lng: areaData[0].lng },
       { lat: areaData[1].lat, lng: areaData[1].lng },
-    ]);
+    ];
+    setOrthoArea(area);
+    loadOrthoScene(area);
+    setView("orthoProcessing");
+  };
+
+  const handleOpenOrtho3d = () => {
+    // The whole point of the 3D view is the city, so if buildings arrived make
+    // sure the layer is on even if it was switched off in an earlier session.
+    if (orthoBuildingCount > 0 && !useCourseStore.getState().scene.showBuildings) {
+      useCourseStore.getState().setScene({ showBuildings: true });
+    }
     setView("ortho3d");
+  };
+
+  const handleClickOrthoNext = () => {
+    if (view === "front") handleFetchOrthoScene();
+    else if (view === "orthoProcessing" && orthoSettled) handleOpenOrtho3d();
   };
 
   const handleClickPrevStep = () => {
@@ -187,6 +211,7 @@ function App() {
     // previously circled rectangle is preserved, so the user can redraw it.
     if (view === "map3d") setView("front");
     else if (view === "ortho3d") setView("front");
+    else if (view === "orthoProcessing") setView("front");
     else if (view === "processing") setView("front");
     else if (view === "gpx3d") {
       setView("front");
@@ -291,6 +316,7 @@ function App() {
             <Title>{t("frontTitle")}</Title>
             <Description>{t("frontDesc")}</Description>
             {mode === "map" && <Steps current={1} />}
+            {mode === "ortho" && <Steps current={1} variant="ortho" />}
           </Column>
 
           <Row gap="0.5rem">
@@ -306,7 +332,22 @@ function App() {
           </Row>
 
           {mode !== "gpx" ? (
-            <Column gap="0.75rem">
+            <div
+              css={css({
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.75rem",
+                // In orienteering mode the course name and the action buttons
+                // sit under the map, so the map gives up some height and
+                // everything fits on one screen without zooming out.
+                ...(mode === "ortho"
+                  ? {
+                      "--map-h": "min(52vh, 560px)",
+                      "@media (max-width: 720px)": { "--map-h": "38dvh" },
+                    }
+                  : {}),
+              } as Parameters<typeof css>[0])}
+            >
               <MapComponent
                 onRemove={handleRemove}
                 onDone={handleDone}
@@ -342,7 +383,7 @@ function App() {
                     <button
                       type="button"
                       disabled={isNextButtonDisabled}
-                      onClick={handleOpenOrtho3d}
+                      onClick={handleFetchOrthoScene}
                       css={css({
                         flex: 1,
                         display: "flex",
@@ -415,7 +456,7 @@ function App() {
                   />
                 </Column>
               )}
-            </Column>
+            </div>
           ) : (
             <Column gap="0.75rem">
               <div
@@ -488,6 +529,18 @@ function App() {
         </Column>
       </FullscreenModal>
 
+      {/* ---------- Orienteering: get the 3D scene ---------- */}
+      <FullscreenModal isOpen={view === "orthoProcessing"}>
+        <Column gap="1rem">
+          <Column gap="0.5rem">
+            <Title>{t("orthoProcessingTitle")}</Title>
+            <Description>{t("orthoProcessingDesc")}</Description>
+            <Steps current={2} variant="ortho" />
+          </Column>
+          <OrthoProcessing />
+        </Column>
+      </FullscreenModal>
+
       {/* ---------- Step buttons (map mode) ---------- */}
       <PrevButton
         isShow={view !== "front" && view !== "ortho3d"}
@@ -500,6 +553,33 @@ function App() {
             ? t("editArea")
             : t("prevStep")}
       </PrevButton>
+
+      <NextButton
+        isShow={mode === "ortho" && (view === "front" || view === "orthoProcessing")}
+        disabled={
+          view === "front"
+            ? isNextButtonDisabled
+            : !orthoSettled
+        }
+        onClick={handleClickOrthoNext}
+      >
+        {view === "orthoProcessing" && !orthoSettled ? (
+          <>
+            <Loader2
+              css={[IconSize, css({ animation: `${spinAnimation} 1s linear infinite` })]}
+            />
+            {t("fetching")}
+          </>
+        ) : view === "orthoProcessing" && orthoBuildingsState === "error" ? (
+          <>
+            {t("orthoContinueAnyway")} <ChevronRight css={IconSize} />
+          </>
+        ) : (
+          <>
+            {t("nextStep")} <ChevronRight css={IconSize} />
+          </>
+        )}
+      </NextButton>
 
       <NextButton
         isShow={mode === "map" && (view === "front" || view === "processing")}
