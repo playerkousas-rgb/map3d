@@ -11,6 +11,8 @@
  *   - "Redeploy" of the same commit
  *   - previous commit not in Vercel's shallow clone, or any git error
  *   - empty "trigger deploy" commits
+ * Also skips preview deployments of automation branches (arena/*, dependabot/*,
+ * renovate/* …) — see NO_PREVIEW_BRANCHES; PREVIEW_DEPLOYS=1 re-enables them.
  * Set FORCE_BUILD=1 (Vercel env var) to always build.
  *
  * Note: Vercel compares against the last *successful* deployment
@@ -42,6 +44,18 @@ function git(args) {
 }
 
 if (process.env.FORCE_BUILD === "1") build("FORCE_BUILD=1");
+
+// Automation branches (AI-agent sessions, dependency bots) push often and
+// nobody opens their Vercel preview — every one of those deployments still
+// costs build minutes and storage. Skip them; their code is deployed when
+// the PR lands on the production branch. Set PREVIEW_DEPLOYS=1 in Vercel to
+// get previews for them again, or FORCE_BUILD=1 for a one-off.
+const NO_PREVIEW_BRANCHES = [/^arena\//, /^dependabot\//, /^renovate\//, /^codex\//, /^copilot\//, /^cursor\//];
+const branch = process.env.VERCEL_GIT_COMMIT_REF || "";
+const isProduction = process.env.VERCEL_ENV === "production";
+if (!isProduction && process.env.PREVIEW_DEPLOYS !== "1" && NO_PREVIEW_BRANCHES.some((re) => re.test(branch))) {
+  skip(`automation branch "${branch}" — previews are off for it (set PREVIEW_DEPLOYS=1 to enable)`);
+}
 
 const previous = process.env.VERCEL_GIT_PREVIOUS_SHA;
 let current = process.env.VERCEL_GIT_COMMIT_SHA;

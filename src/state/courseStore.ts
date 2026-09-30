@@ -77,6 +77,12 @@ function loadPersisted(): Persisted {
 }
 
 interface CourseStore extends Persisted {
+  /**
+   * Player mode: the course arrived through a share link and is only viewed.
+   * Nothing is editable and nothing is written to localStorage, so opening a
+   * player link never overwrites the course a planner has on the same phone.
+   */
+  readOnly: boolean;
   selectedId: string | null;
   tool: OrthoTool;
   panelSnap: PanelSnap;
@@ -104,10 +110,16 @@ interface CourseStore extends Persisted {
 
   undo: () => void;
   redo: () => void;
+
+  /** Show a shared course read-only (player link). */
+  enterPlayMode: (course: Course, area: [LatLng, LatLng]) => void;
+  /** Leave player mode and bring back the planner's own saved course. */
+  exitPlayMode: () => void;
 }
 
 function persist(state: CourseStore) {
   if (typeof localStorage === "undefined") return;
+  if (state.readOnly) return;
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -125,6 +137,7 @@ function commit(
   mutate: (course: Course, state: CourseStore) => Partial<CourseStore>,
 ) {
   const state = get();
+  if (state.readOnly) return;
   const snapshot = structuredClone(state.course);
   set((current) => {
     const patch = mutate(current.course, current);
@@ -142,6 +155,7 @@ const initial = loadPersisted();
 
 export const useCourseStore = create<CourseStore>((set, get) => ({
   ...initial,
+  readOnly: false,
   selectedId: null,
   tool: "view",
   panelSnap: "peek",
@@ -149,11 +163,13 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   future: [],
 
   setName: (name) => {
+    if (get().readOnly) return;
     set((state) => ({ course: { ...state.course, name } }));
     persist(get());
   },
 
   setTool: (tool) => {
+    if (get().readOnly) return;
     // Placing controls needs the list visible, so opening a placing tool lifts
     // the sheet out of its collapsed state.
     set(tool === "view" ? { tool } : { tool, panelSnap: "half" });
@@ -228,6 +244,7 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
     })),
 
   replaceCourse: (course) => {
+    if (get().readOnly) return;
     const snapshot = structuredClone(get().course);
     set((state) => ({
       course,
@@ -278,6 +295,33 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
       selectedId: null,
     });
     persist(get());
+  },
+
+  enterPlayMode: (course, area) =>
+    set({
+      readOnly: true,
+      course,
+      area,
+      selectedId: null,
+      tool: "view",
+      panelSnap: "peek",
+      past: [],
+      future: [],
+    }),
+
+  exitPlayMode: () => {
+    if (!get().readOnly) return;
+    const saved = loadPersisted();
+    set({
+      readOnly: false,
+      course: saved.course,
+      area: saved.area,
+      scene: saved.scene,
+      selectedId: null,
+      tool: "view",
+      past: [],
+      future: [],
+    });
   },
 
   redo: () => {

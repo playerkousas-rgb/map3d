@@ -11,9 +11,9 @@
  * never disagree.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { css } from "@emotion/react";
-import { Download, FileUp, Redo2, Trash2, Undo2, Upload } from "lucide-react";
+import { Download, Eye, FileUp, Redo2, Share2, Trash2, Undo2, Upload } from "lucide-react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { TapButton } from "@/components/ui/Touch";
 import { CourseToolbar } from "./CourseToolbar";
@@ -31,6 +31,7 @@ import {
 } from "@/utils/course";
 import { formatDeg, gridRefs, parseGridInput } from "@/utils/hkgeo";
 import { downloadBlob } from "@/utils/exporters";
+import { buildShareUrl } from "@/utils/shareLink";
 import { fmtLength } from "@/utils/measure";
 
 export function CoursePanel() {
@@ -49,6 +50,44 @@ export function CoursePanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<"controls" | "scene">("controls");
   const [importError, setImportError] = useState(false);
+  const readOnly = useCourseStore((state) => state.readOnly);
+  const canUndo = useCourseStore((state) => state.past.length > 0);
+  const canRedo = useCourseStore((state) => state.future.length > 0);
+  const area = useCourseStore((state) => state.area);
+  const [shareNote, setShareNote] = useState<"copied" | "failed" | "empty" | null>(null);
+
+  useEffect(() => {
+    if (!shareNote) return;
+    const timer = window.setTimeout(() => setShareNote(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [shareNote]);
+
+  const handleShare = async () => {
+    if (!area || course.controls.length === 0) {
+      setShareNote("empty");
+      return;
+    }
+    try {
+      const url = await buildShareUrl(area, course);
+      const title = course.name || t("orthoTitle");
+      const nav = navigator as Navigator & { share?: (data: ShareData) => Promise<void> };
+      if (nav.share) {
+        try {
+          await nav.share({ title, text: `${title}\n${t("orthoShareText")}`, url });
+          return;
+        } catch (err) {
+          // The user closed the sheet — not an error; anything else falls back
+          // to the clipboard below.
+          if ((err as DOMException)?.name === "AbortError") return;
+        }
+      }
+      await navigator.clipboard.writeText(url);
+      setShareNote("copied");
+    } catch (err) {
+      console.warn("[map3d] share failed:", err);
+      setShareNote("failed");
+    }
+  };
 
   return (
     <BottomSheet
@@ -59,6 +98,27 @@ export function CoursePanel() {
       onSnapChange={setPanelSnap}
       header={
         <div css={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
+          {readOnly ? (
+            <div css={css({ display: "flex", flexDirection: "column", gap: "4px" })}>
+              <div
+                css={css({
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "11.5px",
+                  fontWeight: 700,
+                  color: "#0b62c4",
+                })}
+              >
+                <Eye css={css({ width: "14px", height: "14px" })} />
+                {t("orthoPlayerBadge")}
+              </div>
+              <div css={css({ fontSize: "15px", fontWeight: 700, color: "#202124" })}>
+                {course.name || t("orthoTitle")}
+              </div>
+              <p css={css({ margin: 0, fontSize: "12px", color: "#5f6368" })}>{t("orthoPlayerHint")}</p>
+            </div>
+          ) : (
           <div css={css({ display: "flex", alignItems: "center", gap: "6px" })}>
             <input
               value={course.name}
@@ -83,7 +143,7 @@ export function CoursePanel() {
             <TapButton
               aria-label={t("orthoUndo")}
               title={t("orthoUndo")}
-              disabled={useCourseStore((state) => state.past.length === 0)}
+              disabled={!canUndo}
               onClick={() => useCourseStore.getState().undo()}
             >
               <Undo2 css={css({ width: "18px", height: "18px" })} />
@@ -91,14 +151,15 @@ export function CoursePanel() {
             <TapButton
               aria-label={t("orthoRedo")}
               title={t("orthoRedo")}
-              disabled={useCourseStore((state) => state.future.length === 0)}
+              disabled={!canRedo}
               onClick={() => useCourseStore.getState().redo()}
             >
               <Redo2 css={css({ width: "18px", height: "18px" })} />
             </TapButton>
           </div>
+          )}
 
-          <CourseToolbar />
+          {!readOnly && <CourseToolbar />}
 
           <div
             css={css({
@@ -155,7 +216,7 @@ export function CoursePanel() {
           )}
 
           {selected ? (
-            <ControlEditor control={selected} />
+            readOnly ? <ControlDetails control={selected} /> : <ControlEditor control={selected} />
           ) : (
             <p css={css({ margin: 0, fontSize: "12px", color: "#9aa0a6" })}>{t("orthoSelectPrompt")}</p>
           )}
@@ -187,11 +248,38 @@ export function CoursePanel() {
             </ol>
           )}
 
+          {!readOnly && (
+            <TapButton active onClick={handleShare}>
+              <Share2 css={css({ width: "16px", height: "16px" })} />
+              {t("orthoShare")}
+            </TapButton>
+          )}
+          {shareNote && (
+            <p
+              role="status"
+              css={css({
+                margin: 0,
+                fontSize: "12px",
+                color: shareNote === "copied" ? "#1e8e3e" : "#c5221f",
+              })}
+            >
+              {t(
+                shareNote === "copied"
+                  ? "orthoShareCopied"
+                  : shareNote === "empty"
+                    ? "orthoShareEmpty"
+                    : "orthoShareFailed",
+              )}
+            </p>
+          )}
+
           <div css={css({ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" })}>
+            {!readOnly && (
             <TapButton onClick={() => fileRef.current?.click()}>
               <FileUp css={css({ width: "16px", height: "16px" })} />
               {t("orthoImport")}
             </TapButton>
+            )}
             <TapButton
               onClick={() =>
                 downloadBlob(
@@ -213,6 +301,7 @@ export function CoursePanel() {
               <Upload css={css({ width: "16px", height: "16px" })} />
               {t("orthoExportModel")}
             </TapButton>
+            {!readOnly && (
             <TapButton
               tone="danger"
               onClick={() => {
@@ -224,6 +313,7 @@ export function CoursePanel() {
               <Trash2 css={css({ width: "16px", height: "16px" })} />
               {t("orthoClearAll")}
             </TapButton>
+            )}
             <label
               css={css({
                 display: "flex",
@@ -244,6 +334,7 @@ export function CoursePanel() {
             </label>
           </div>
 
+          {!readOnly && (
           <select
             value={course.playMode}
             onChange={(event) =>
@@ -266,6 +357,7 @@ export function CoursePanel() {
             <option value="linear">{t("orthoLinearMode")}</option>
             <option value="score">{t("orthoScoreMode")}</option>
           </select>
+          )}
 
           <input
             ref={fileRef}
@@ -372,6 +464,62 @@ function ControlRow({
         </span>
       </button>
     </li>
+  );
+}
+
+/** Read-only card shown to players: everything printed on the control card. */
+function ControlDetails({ control }: { control: CourseControl }) {
+  const { t, lang } = useI18n();
+  const zh = lang === "zh";
+  const refs = gridRefs(control.lat, control.lng);
+  const playMode = useCourseStore((state) => state.course.playMode);
+  const label = css({ fontSize: "11px", fontWeight: 600, color: "#5f6368" });
+  const value = css({ fontSize: "13.5px", color: "#202124", fontWeight: 500 });
+
+  return (
+    <div
+      css={css({
+        border: "1px solid #d7e5fb",
+        backgroundColor: "#f7fbff",
+        borderRadius: "14px",
+        padding: "10px 12px",
+        display: "grid",
+        gridTemplateColumns: "auto 1fr",
+        columnGap: "12px",
+        rowGap: "6px",
+        alignItems: "baseline",
+      })}
+    >
+      <span css={label}>{t("orthoCode")}</span>
+      <span css={[value, css({ fontWeight: 700, color: "#c2185b" })]}>
+        {control.code || controlSymbol(control.kind)} · {controlKindLabel(control.kind, zh)}
+      </span>
+      {control.name && (
+        <>
+          <span css={label}>{t("orthoName")}</span>
+          <span css={value}>{control.name}</span>
+        </>
+      )}
+      {control.clue && (
+        <>
+          <span css={label}>{t("orthoClue")}</span>
+          <span css={value}>{control.clue}</span>
+        </>
+      )}
+      {playMode === "score" && control.kind === "control" && (
+        <>
+          <span css={label}>{t("orthoScore")}</span>
+          <span css={value}>{control.score} pt</span>
+        </>
+      )}
+      <span css={label}>{t("orthoGridRef")}</span>
+      <span css={value}>
+        {refs.fig8}
+        <span css={css({ display: "block", fontSize: "11px", color: "#9aa0a6" })}>
+          {control.lat.toFixed(5)}, {control.lng.toFixed(5)}
+        </span>
+      </span>
+    </div>
   );
 }
 

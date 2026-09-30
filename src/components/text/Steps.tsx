@@ -2,13 +2,15 @@ import { css } from "@emotion/react";
 import { useI18n, TranslationKey } from "@/i18n";
 
 const LABELS: TranslationKey[] = ["stepLabel1", "stepLabel2", "stepLabel3"];
+const ORTHO_LABELS: TranslationKey[] = ["orthoStepLabel1", "orthoStepLabel2", "orthoStepLabel3"];
 
 /**
  * Compact 3-step progress indicator so users always know where they are
  * in the flow (circle area → fetch data → view & export 3D).
  */
-export function Steps({ current }: { current: 1 | 2 | 3 }) {
+export function Steps({ current, variant = "map" }: { current: 1 | 2 | 3; variant?: "map" | "ortho" }) {
   const { t } = useI18n();
+  const labels = variant === "ortho" ? ORTHO_LABELS : LABELS;
 
   return (
     <div
@@ -20,7 +22,7 @@ export function Steps({ current }: { current: 1 | 2 | 3 }) {
       })}
       aria-label={`Step ${current} of 3`}
     >
-      {LABELS.map((key, i) => {
+      {labels.map((key, i) => {
         const n = (i + 1) as 1 | 2 | 3;
         const state = n === current ? "active" : n < current ? "done" : "todo";
         return (

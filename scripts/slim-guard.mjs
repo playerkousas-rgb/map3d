@@ -20,12 +20,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const LIMITS = {
   repoFileBytes: 1_000_000, // any committed file (package-lock.json exempt)
+  imageFileBytes: 300_000, // any committed image, anywhere (screenshots: resize + webp)
+  repoTotalBytes: 3_000_000, // everything committed, excluding node_modules / dist / .git
   publicFileBytes: 500_000, // any file in public/ (copied to the CDN as-is)
   distTotalBytes: 3_000_000, // whole dist/ folder (currently ~1.4 MB)
   distFileBytes: 1_200_000, // any single emitted file (largest chunk ~0.7 MB)
   distFiles: 40,
   dependencies: 15, // runtime dependencies (warning only)
 };
+
+/** Raster images — allowed, but only small ones (see LIMITS.imageFileBytes). */
+const IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|tiff?|ico)$/i;
+
+/**
+ * Heavy media / design sources / archives that have no business in a web
+ * repo — host them elsewhere and link to them.
+ */
+const HEAVY = /\.(mp4|mov|avi|mkv|webm|mp3|wav|flac|psd|ai|sketch|fig|xd|zip|rar|7z|tar|gz|tgz|pdf|exe|dmg|iso|glb|gltf|stl|obj|fbx|hdr|exr)$/i;
 
 /** Backup / temp / OS junk that must never be committed or deployed. */
 const JUNK = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$|\.(bak|tmp|temp|old|orig|rej|swp|swo|log)$|~$/i;
@@ -156,6 +167,40 @@ function orphanLockEntries(lock) {
   return Object.keys(pkgs).filter((k) => k && !seen.has(k));
 }
 
+/** src/ files not reachable from the entry point through imports. */
+function orphanSources(files) {
+  const sources = files.filter((f) => /^src\/.*\.(tsx?|css)$/.test(f) && !/\.d\.ts$/.test(f));
+  const entry = "src/main.tsx";
+  if (!exists(entry)) return [];
+  const exts = ["", ".ts", ".tsx", ".css", "/index.ts", "/index.tsx"];
+  const resolve = (from, spec) => {
+    let base = null;
+    if (spec.startsWith("@/")) base = `src/${spec.slice(2)}`;
+    else if (spec.startsWith(".")) base = path.posix.normalize(`${path.posix.dirname(from)}/${spec}`);
+    if (!base) return null;
+    for (const ext of exts) {
+      const candidate = base + ext;
+      if (exists(candidate) && fs.statSync(path.join(ROOT, candidate)).isFile()) return candidate;
+    }
+    return null;
+  };
+  const seen = new Set([entry]);
+  const queue = [entry];
+  const IMPORT = /(?:^|[^\w$])(?:import|export)\s*(?:[^"'`;]*?\s*from\s*)?["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g;
+  while (queue.length) {
+    const file = queue.pop();
+    const text = read(file);
+    for (const match of text.matchAll(IMPORT)) {
+      const hit = resolve(file, match[1] ?? match[2]);
+      if (hit && !seen.has(hit)) {
+        seen.add(hit);
+        queue.push(hit);
+      }
+    }
+  }
+  return sources.filter((f) => !seen.has(f));
+}
+
 // ---------------------------------------------------------------------------
 
 function checkRepo() {
@@ -177,6 +222,21 @@ function checkRepo() {
     if (file.startsWith("public/") && size > LIMITS.publicFileBytes) {
       error(`public asset too large: ${file} (${kb(size)} > ${kb(LIMITS.publicFileBytes)})`);
     }
+    if (IMAGE.test(file) && size > LIMITS.imageFileBytes) {
+      error(`image too large: ${file} (${kb(size)} > ${kb(LIMITS.imageFileBytes)}) — resize to ≤ 1400 px and save as WebP`);
+    }
+    if (HEAVY.test(file)) {
+      error(`heavy media / archive committed: ${file} — host it outside the repo (Release asset, cloud drive) and link to it`);
+    }
+  }
+  if (totalBytes > LIMITS.repoTotalBytes) {
+    error(`repository is ${kb(totalBytes)} (budget ${kb(LIMITS.repoTotalBytes)}) — see docs/SLIM.md before raising the budget`);
+  }
+
+  // Source files nothing imports are dead weight that still gets uploaded,
+  // type-checked and linted on every deploy.
+  for (const orphan of orphanSources(files)) {
+    error(`unused source file: ${orphan} — nothing imports it from src/main.tsx; delete it or wire it in`);
   }
 
   // public/ assets that nothing references are deployed for nothing

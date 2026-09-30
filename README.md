@@ -3,7 +3,7 @@
 <p align='center'>Generate real-world 3D maps & 3D-printable GPX models / 生成真實世界 3D 地圖與可列印 GPX 模型</p>
 </p>
 
-![img](./.github/screenshot.png)
+![img](./.github/screenshot.webp)
 
 ## About The Project
 
@@ -31,7 +31,7 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 
 **Mode 3 — 3D City Orienteering（3D 城市定向 · 手機優先）**
 
-- Pick the course area on the map, then work in a 3D view of the real city
+- Three steps like the building mode: ① circle the course area on the map → ② get the 3D scene (buildings, roads and terrain load with a visible status and per-item retry) → ③ place the controls in the 3D city
 - Checkpoints are drawn as the orienteering symbols — △ start, ○ control (with its number), ◎ finish — standing on the terrain, with the course line between them
 - Place by tapping the ground, drag a marker to move it, tap it to delete; each control carries a code, name, clue and score
 - Live leg information in the HM20C grid-reference style used on paper: `50Q KK 0834 6805`, 6-figure `KK 083 680`, planar leg distance and grid **and** magnetic bearing (3.1°W)
@@ -39,6 +39,7 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 - A 1 km UTM grid traced along the hills, so distances can be judged in the scene
 - Courses import and export as JSON — the same shape the Scout System / HKMAP planner writes, so a course drafted on the desktop imports straight into the phone
 - One-tap **GLB / STL export** of the scene (ground, city, course line and markers) for a 3D print or for sharing
+- **Share with players（分享給玩家）** — one tap builds a `#play=…` link that carries the area and the whole course (compressed into the URL, nothing uploaded). Players open it and land straight in the 3D city in a read-only *player view*: they can orbit, tap a control to read its code / clue / grid reference, and export the GLB, but nothing can be moved or edited, and the link never overwrites a course saved on their own phone
 
 **Mobile-first UI（手機優先）**
 
@@ -70,12 +71,16 @@ npm run dev
 
 ## Deployment (Vercel) & slimming guards / 部署與瘦身防呆
 
+> **改版前先讀 [`docs/SLIM.md`](./docs/SLIM.md)（瘦身防呆原則）** — 哪些東西不能提交、各項容量預算、以及 Vercel Dashboard 要做的保留期設定。`npm run check` 會強制執行大部分條款。
+
 - **`vercel.json`** pins the Vite build (`npm run build` → `dist/`) — only `dist/` is served. Hashed files in `/assets/` are cached for a year (`immutable`), and vendor code (React / three.js / Leaflet) is split into separate chunks, so a deploy that only changes app code makes returning visitors re-download ~50 kB instead of the whole ~1.4 MB bundle.
 - **`.vercelignore`** keeps `.git`, `node_modules`, local builds, logs, backups (`*.bak *.tmp *.old`…), test `uploads/`, docs and screenshots out of Vercel.
-- **Ignored Build Step** (`scripts/vercel-ignore-build.mjs`): pushes that only touch docs (`*.md`, `docs/`, `.github/`) don't trigger a new build. Anything uncertain always builds; set `FORCE_BUILD=1` to force. Requires *Automatically expose System Environment Variables* (on by default).
+- **Ignored Build Step** (`scripts/vercel-ignore-build.mjs`): pushes that only touch docs (`*.md`, `docs/`, `.github/`) don't trigger a new build, and automation branches (`arena/*`, `dependabot/*`, `renovate/*`…) get no preview deployments (`PREVIEW_DEPLOYS=1` re-enables them). Anything uncertain always builds; set `FORCE_BUILD=1` to force. Requires *Automatically expose System Environment Variables* (on by default).
 - **`scripts/slim-guard.mjs`** (防呆) fails `npm run check`, CI and the Vercel build when:
   - backup / temp / log files, `dist/`, `node_modules/` or `uploads/` are committed
-  - a file is > 1 MB, a `public/` asset is > 500 kB or not referenced anywhere
+  - heavy media / design sources / archives / 3D models are committed
+  - a file is > 1 MB, an image is > 300 kB, the repo is > 3 MB, a `public/` asset is > 500 kB or not referenced anywhere
+  - a `src/` file is not reachable from `src/main.tsx` (dead code)
   - build-only tools (Vite, TypeScript, `@types/*`, ESLint, Tailwind…) land in `dependencies`
   - `package-lock.json` is out of sync or carries orphan entries
   - `.vercelignore` is missing required entries or would hide build inputs; `vercel.json` points to the wrong output
