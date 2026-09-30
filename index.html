@@ -2,8 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>map3d</title>
+    <!-- viewport-fit=cover + user-scalable=no: the 3D scenes use one-finger
+         orbit and two-finger pinch, so browser pinch-zoom and double-tap zoom
+         must stay out of the way; safe-area insets keep UI clear of the notch. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta
+      name="description"
+      content="Real-world 3D maps, printable GPX models and a 3D city-orienteering view built from OpenStreetMap and Hong Kong Lands Department map data."
+    />
+    <title>map3d · 3D 定向地圖</title>
   </head>
   <body>
     <div id="root"></div>

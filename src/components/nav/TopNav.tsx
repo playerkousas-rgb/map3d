@@ -2,7 +2,7 @@ import { css } from "@emotion/react";
 import { DetailedHTMLProps, ButtonHTMLAttributes } from "react";
 import { useI18n } from "@/i18n";
 
-const TOP_PANEL_HEIGHT = "3rem";
+const TOP_PANEL_HEIGHT = "var(--topnav-h)";
 const BORDER_COLOR = "#ededf290";
 
 interface ButtonProps
@@ -27,6 +27,9 @@ export function TopNav() {
         left: 0,
         width: "100%",
         height: TOP_PANEL_HEIGHT,
+        paddingTop: "var(--safe-top)",
+        paddingLeft: "var(--safe-left)",
+        paddingRight: "var(--safe-right)",
         backgroundColor: "#ffffff50",
         backdropFilter: "blur(12px)",
         borderBottom: `1px solid ${BORDER_COLOR}`,
@@ -42,6 +45,7 @@ export function TopNav() {
           flexDirection: "row",
           display: "flex",
           gap: "0.75rem",
+          "@media (max-width: 720px)": { paddingLeft: "0.85rem", gap: "0.4rem" },
         })}
       >
         <span
@@ -71,6 +75,8 @@ export function TopNav() {
           display: "flex",
           flexDirection: "row",
           gap: "0.5rem",
+          alignItems: "center",
+          "@media (max-width: 720px)": { paddingRight: "0.6rem", gap: "0.35rem" },
         })}
       >
         <NavButton isShow={true} onClick={toggleLang}>
@@ -90,6 +96,7 @@ export function NavButton(props: ButtonProps) {
         backdropFilter: "blur(8px)",
         border: "none",
         padding: "0.5rem 1rem",
+        minHeight: "var(--tap)",
         borderRadius: "8px",
         fontWeight: "300",
         fontSize: "12px",
