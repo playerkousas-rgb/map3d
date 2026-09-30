@@ -3,7 +3,7 @@
 <p align='center'>Generate real-world 3D maps & 3D-printable GPX models / 生成真實世界 3D 地圖與可列印 GPX 模型</p>
 </p>
 
-![img](./.github/screenshot.png)
+![img](./.github/screenshot.webp)
 
 ## About The Project
 
@@ -71,12 +71,16 @@ npm run dev
 
 ## Deployment (Vercel) & slimming guards / 部署與瘦身防呆
 
+> **改版前先讀 [`docs/SLIM.md`](./docs/SLIM.md)（瘦身防呆原則）** — 哪些東西不能提交、各項容量預算、以及 Vercel Dashboard 要做的保留期設定。`npm run check` 會強制執行大部分條款。
+
 - **`vercel.json`** pins the Vite build (`npm run build` → `dist/`) — only `dist/` is served. Hashed files in `/assets/` are cached for a year (`immutable`), and vendor code (React / three.js / Leaflet) is split into separate chunks, so a deploy that only changes app code makes returning visitors re-download ~50 kB instead of the whole ~1.4 MB bundle.
 - **`.vercelignore`** keeps `.git`, `node_modules`, local builds, logs, backups (`*.bak *.tmp *.old`…), test `uploads/`, docs and screenshots out of Vercel.
-- **Ignored Build Step** (`scripts/vercel-ignore-build.mjs`): pushes that only touch docs (`*.md`, `docs/`, `.github/`) don't trigger a new build. Anything uncertain always builds; set `FORCE_BUILD=1` to force. Requires *Automatically expose System Environment Variables* (on by default).
+- **Ignored Build Step** (`scripts/vercel-ignore-build.mjs`): pushes that only touch docs (`*.md`, `docs/`, `.github/`) don't trigger a new build, and automation branches (`arena/*`, `dependabot/*`, `renovate/*`…) get no preview deployments (`PREVIEW_DEPLOYS=1` re-enables them). Anything uncertain always builds; set `FORCE_BUILD=1` to force. Requires *Automatically expose System Environment Variables* (on by default).
 - **`scripts/slim-guard.mjs`** (防呆) fails `npm run check`, CI and the Vercel build when:
   - backup / temp / log files, `dist/`, `node_modules/` or `uploads/` are committed
-  - a file is > 1 MB, a `public/` asset is > 500 kB or not referenced anywhere
+  - heavy media / design sources / archives / 3D models are committed
+  - a file is > 1 MB, an image is > 300 kB, the repo is > 3 MB, a `public/` asset is > 500 kB or not referenced anywhere
+  - a `src/` file is not reachable from `src/main.tsx` (dead code)
   - build-only tools (Vite, TypeScript, `@types/*`, ESLint, Tailwind…) land in `dependencies`
   - `package-lock.json` is out of sync or carries orphan entries
   - `.vercelignore` is missing required entries or would hide build inputs; `vercel.json` points to the wrong output
