@@ -106,6 +106,20 @@ function Scene({ area, buildingsOn, roadsOn, exaggeration, layer, showGrid }: Sc
     return buildRoadsGeometry(roads, projection, groundAt);
   }, [roads, roadsOn, projection, groundAt]);
 
+  // The builders have a very high safety ceiling, but if it is ever reached the
+  // user deserves to hear about it rather than wonder where the rest went.
+  // Only reported while the layer is on — a switched-off layer has drawn
+  // nothing on purpose and is not a "part of the data is missing" case.
+  const setDrawn = useSceneStore((state) => state.setDrawn);
+  const drawnBuildings = cityGeometry.count;
+  const drawnRoads = roadGeometry ? ((roadGeometry.userData.roadsDrawn as number) ?? 0) : 0;
+  useEffect(() => {
+    if (buildingsOn) setDrawn("buildings", drawnBuildings);
+  }, [buildingsOn, drawnBuildings, setDrawn]);
+  useEffect(() => {
+    if (roadsOn) setDrawn("roads", drawnRoads);
+  }, [roadsOn, drawnRoads, setDrawn]);
+
   useEffect(
     () => () => {
       cityGeometry.walls?.dispose();

@@ -39,7 +39,7 @@ import { TopNav } from "@/components/nav/TopNav";
 import { useI18n, TranslationKey } from "@/i18n";
 import { parseGpx, GpxTrack } from "@/utils/gpx";
 import { ExportFormat } from "@/utils/exporters";
-import { normalizeBBox, overpassQuery } from "@/utils/overpass";
+import { CellProgress, fetchBuildingElements } from "@/utils/sceneData";
 import { fmtSize, measureArea } from "@/utils/measure";
 import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
 import { clearShareToken, decodeShare, readShareToken } from "@/utils/shareLink";
@@ -82,6 +82,11 @@ function App() {
   const [isFetchingBuildings, setIsFetchingBuildings] = useState(false);
   const [hasFetchedBuildings, setHasFetchedBuildings] = useState(false);
   const [fetchError, setFetchError] = useState<TranslationKey | null>(null);
+  const [buildingCells, setBuildingCells] = useState<CellProgress>({
+    total: 0,
+    done: 0,
+    failed: 0,
+  });
 
   // --- orienteering mode state ---
   const setOrthoArea = useCourseStore((state) => state.setArea);
@@ -152,8 +157,10 @@ function App() {
 
   const checkIsBig = () => {
     if (areaData.length < 2) return false;
-    // Data-backed limit: dense-city fetches start timing out past ~3 km per
-    // side (0.05° ≈ 7.8k buildings + 17k roads measured in Central, HK).
+    // A big area is no longer a problem — it is fetched as several smaller
+    // pieces instead of one query that would time out (0.05° ≈ 7.8k buildings
+    // + 17k roads measured in Central, HK). The modal just sets expectations
+    // about how long it will take, so nothing is silently dropped.
     return measureArea(areaData[0], areaData[1]).level === "big";
   };
 
@@ -177,18 +184,18 @@ function App() {
   const requestBuildings = async () => {
     setIsFetchingBuildings(true);
     setFetchError(null);
+    setBuildingCells({ total: 0, done: 0, failed: 0 });
 
-    const { south, west, north, east } = normalizeBBox(areaData[0], areaData[1]);
-    const query = `[out:json][timeout:25];(way["building"]( ${south},${west},${north},${east} );relation["building"]( ${south},${west},${north},${east} ););out body geom;`;
     try {
-      const elements = await overpassQuery(query);
-      const blds: Building[] = elements.map((element: any) => ({
-        id: element.id,
-        tags: element.tags,
-        geometry: element.geometry
-          ? element.geometry.map((pt: any) => ({ lat: pt.lat, lng: pt.lon }))
-          : undefined,
-      }));
+      // Split into ~1.2 km cells and publish each one as it lands, so even a
+      // big selection streams in instead of timing out as a single query.
+      const blds = await fetchBuildingElements(
+        [areaData[0], areaData[1]],
+        (partial, cells) => {
+          setBuildings(partial);
+          setBuildingCells(cells);
+        },
+      );
       setBuildings(blds);
       appendAreas(blds);
       setHasFetchedBuildings(true);
@@ -571,6 +578,7 @@ function App() {
             buildings={buildings}
             loading={isFetchingBuildings}
             fetched={hasFetchedBuildings}
+            cells={buildingCells}
           />
         </Column>
       </FullscreenModal>

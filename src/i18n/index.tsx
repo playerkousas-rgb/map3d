@@ -31,9 +31,9 @@ const dict = {
       "Click “Select Box”, then drag on the map to circle the area you want.",
     mapHintReady:
       "Area selected ✓ — drag again to adjust it, or press “Next Step” at the bottom right.",
-    sizeWarn: "The area is large — fetching the data may take a little longer.",
+    sizeWarn: "The area is large — the data is loaded in pieces, so give it a moment.",
     sizeBig:
-      "The area is too large — fetching may time out. Try keeping each side under 3 km.",
+      "Big area — it is loaded in pieces, so this will take a little while (nothing is left out).",
 
     // Steps
     stepLabel1: "① Circle an area",
@@ -45,7 +45,7 @@ const dict = {
     fetching: "Fetching...",
     fetchingBuildings: "Fetching building information...",
     fetchIdle: "Press “Next Step” to fetch building data for the selected area.",
-    fetchSeconds: "Usually takes 2–10 seconds.",
+    fetchSeconds: "Small areas take seconds; bigger ones are loaded piece by piece.",
     buildingsLoaded: "Buildings loaded:",
     readyFor3d: "Press “Next Step” again to open the 3D view.",
     noBuildings:
@@ -56,10 +56,11 @@ const dict = {
     sceneHint: "Drag to rotate · Scroll to zoom · Click a building for info",
     sceneHintGpx: "Drag to rotate · Scroll to zoom · Use the panel to tune the model",
     export: "Export",
-    tooBigTitle: "The area is too big",
-    tooBigDesc: "Do you want to proceed?",
+    tooBigTitle: "Big area selected",
+    tooBigDesc:
+      "It is loaded piece by piece, so this will take a little while. Nothing is left out — continue?",
     fetchFailed:
-      "Couldn't load building data from OpenStreetMap (backup servers were tried too). Please click Next Step to retry in a moment, or select a smaller area.",
+      "Couldn't load building data from OpenStreetMap (several servers were tried). Press Next Step to try again.",
 
     // Place search
     searchPlaceholder: "Search a place or address…",
@@ -121,6 +122,9 @@ const dict = {
       "The buildings, roads and terrain of the area are being loaded. Once they are in, press Next Step to open the 3D city and place the controls.",
     orthoRetry: "Retry",
     orthoNoBuildingsHere: "none in this area",
+    orthoCellsPartial: "part of the area",
+    orthoSomeCellsFailed: "Part of the area could not be loaded — the rest is fine to use.",
+    orthoDrawnPartial: "showing part of them",
     orthoReadyFor3d: "Ready — press “Next Step” to open the 3D scene and place the controls.",
     orthoBuildingsFailedHint:
       "The building data could not be loaded (OpenStreetMap busy). Retry, or continue without buildings.",
@@ -226,8 +230,8 @@ const dict = {
     mapHintEmpty: "點擊右上角「框選區域」，再於地圖上拖曳圈出想要的範圍。",
     mapHintReady:
       "已圈選範圍 ✓ 可再拖曳調整，或按右下角「下一步」繼續。",
-    sizeWarn: "範圍較大，抓取資料可能需要較久。",
-    sizeBig: "範圍過大，抓取容易逾時 — 建議每邊縮到 3 公里以內。",
+    sizeWarn: "範圍較大，資料會分批載入，需要一點時間。",
+    sizeBig: "範圍很大 — 會分批載入所以要等一會兒（不會漏掉資料）。",
 
     // Steps
     stepLabel1: "① 圈選範圍",
@@ -238,7 +242,7 @@ const dict = {
     fetching: "抓取中...",
     fetchingBuildings: "正在抓取建築物資料...",
     fetchIdle: "按右下角「下一步」，抓取所選範圍的建築物資料。",
-    fetchSeconds: "通常需要 2–10 秒。",
+    fetchSeconds: "細範圍只需幾秒；大範圍會逐批載入。",
     buildingsLoaded: "已載入建築物：",
     readyFor3d: "再按一次「下一步」，即可開啟 3D 場景。",
     noBuildings: "此範圍找不到建築物 — 可按下一步查看道路，或返回調整範圍。",
@@ -248,10 +252,9 @@ const dict = {
     sceneHint: "拖曳旋轉 · 滾輪縮放 · 點擊建築物查看資訊",
     sceneHintGpx: "拖曳旋轉 · 滾輪縮放 · 右上面板可調整模型",
     export: "匯出",
-    tooBigTitle: "選取範圍太大",
-    tooBigDesc: "確定要繼續嗎？",
-    fetchFailed:
-      "未能從 OpenStreetMap 取得建築資料（已自動嘗試備用伺服器）。請稍後再按「下一步」重試，或縮小選取範圍。",
+    tooBigTitle: "選取範圍很大",
+    tooBigDesc: "會分批載入，所以需要一點時間。資料不會漏掉 — 要繼續嗎？",
+    fetchFailed: "未能從 OpenStreetMap 取得建築資料（已嘗試多個伺服器）。請再按一次「下一步」重試。",
 
     // Place search
     searchPlaceholder: "搜尋地點或地址…",
@@ -312,6 +315,9 @@ const dict = {
     orthoProcessingDesc: "正在載入此範圍的建築物、道路及地形。載入完成後按「下一步」，即可開啟 3D 城市並放置檢查點。",
     orthoRetry: "重試",
     orthoNoBuildingsHere: "此範圍沒有建築物",
+    orthoCellsPartial: "部分範圍",
+    orthoSomeCellsFailed: "部分範圍未能載入 — 其餘部分可以正常使用。",
+    orthoDrawnPartial: "只顯示部分",
     orthoReadyFor3d: "已準備好 — 按「下一步」開啟 3D 場景並放置檢查點。",
     orthoBuildingsFailedHint: "未能載入建築物資料（OpenStreetMap 繁忙）。可以重試，或不帶建築物繼續。",
     orthoContinueAnyway: "仍然開啟 3D",

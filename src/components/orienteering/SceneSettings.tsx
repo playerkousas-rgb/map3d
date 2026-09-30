@@ -68,10 +68,21 @@ export function SceneSettings() {
   const setScene = useCourseStore((state) => state.setScene);
   const status = useSceneStore();
 
-  const layerNote = (value: "ready" | "loading" | "error" | "idle", count: number, key: TranslationKey) => {
+  const layerNote = (
+    value: "ready" | "loading" | "error" | "idle",
+    count: number,
+    key: TranslationKey,
+    drawn: number | null,
+  ) => {
     if (value === "loading") return `${t(key)} · ${t("orthoLoadingShort")}`;
     if (value === "error") return `${t(key)} · ${t("orthoFailedShort")}`;
-    return `${t(key)} ${count.toLocaleString("en-US")}`;
+    const fetched = count.toLocaleString("en-US");
+    // Only ever a difference when the safety ceiling was reached — then say so
+    // instead of letting the missing geometry look like a loading failure.
+    if (drawn !== null && drawn < count) {
+      return `${t(key)} ${drawn.toLocaleString("en-US")} / ${fetched} · ${t("orthoDrawnPartial")}`;
+    }
+    return `${t(key)} ${fetched}`;
   };
 
   return (
@@ -156,8 +167,22 @@ export function SceneSettings() {
           paddingTop: "10px",
         })}
       >
-        <span>{layerNote(status.buildings, status.buildingCount, "orthoBuildingCount")}</span>
-        <span>{layerNote(status.roads, status.roadCount, "orthoRoadCount")}</span>
+        <span>
+          {layerNote(
+            status.buildings,
+            status.buildingCount,
+            "orthoBuildingCount",
+            scene.showBuildings ? status.drawnBuildings : null,
+          )}
+        </span>
+        <span>
+          {layerNote(
+            status.roads,
+            status.roadCount,
+            "orthoRoadCount",
+            scene.showRoads ? status.drawnRoads : null,
+          )}
+        </span>
         <span>
           {status.terrain === "ready"
             ? `${t("orthoTerrainRange")} ${status.terrainMin}–${status.terrainMax} m · ${status.terrainSource}`

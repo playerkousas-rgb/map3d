@@ -33,6 +33,8 @@ import {
   type Course,
 } from "../src/utils/course";
 import { latToTileY, lngToTileX, tileXToLng, tileYToLat, chooseZoom, tileRange } from "../src/utils/tiles";
+import { planCells } from "../src/utils/sceneData";
+import { MAX_BUILDINGS, MAX_ROADS } from "../src/three/orthoGeometry";
 import { heightAt, fieldRange, type HeightField } from "../src/utils/terrain";
 import { createProjection } from "../src/utils/projection";
 import {
@@ -239,6 +241,92 @@ const chosen = chooseZoom(bbox, 64, 20);
 ok(chosen.count <= 64, "chosen zoom stays inside the tile budget", String(chosen.count));
 const finer = chooseZoom({ south: 22.293, west: 114.169, north: 22.294, east: 114.17 }, 64, 20);
 ok(finer.z >= 17, "a small area gets a detailed zoom", String(finer.z));
+
+/* ---------------------------------------------------------------- *
+ * 4b. Overpass area splitting (this is what makes big areas load)
+ * ---------------------------------------------------------------- */
+console.log("\n[4b] Overpass cell planning");
+const kmBox = (km: number) => ({
+  south: 22.3,
+  west: 114.16,
+  north: 22.3 + km / 110.574,
+  east: 114.16 + km / (111.32 * Math.cos((22.3 * Math.PI) / 180)),
+});
+
+const small = planCells(kmBox(1));
+ok(small.length === 1, "a 1 km box is still a single query", String(small.length));
+ok(
+  small[0].south === kmBox(1).south && small[0].east === kmBox(1).east,
+  "an unsplit box is passed through untouched",
+);
+
+const mid = planCells(kmBox(2.2));
+ok(mid.length === 4, "a 2.2 km box becomes 2×2 cells", String(mid.length));
+const huge = planCells(kmBox(40));
+ok(huge.length === 25, "an oversized box is capped at 5×5 cells", String(huge.length));
+
+// The cells must tile the requested area exactly: cover every bit of it, stay
+// inside it, and form a proper rows×cols grid (an overlap would double-count
+// buildings, a gap would lose them).
+for (const [name, box] of [
+  ["2.2 km", kmBox(2.2)],
+  ["5.5 km", kmBox(5.5)],
+  ["40 km", kmBox(40)],
+] as const) {
+  const cells = planCells(box);
+  const inside = cells.every(
+    (c) =>
+      c.south >= box.south - 1e-9 &&
+      c.north <= box.north + 1e-9 &&
+      c.west >= box.west - 1e-9 &&
+      c.east <= box.east + 1e-9,
+  );
+  ok(inside, `${name} cells stay inside the selection`);
+
+  const souths = new Set(cells.map((c) => c.south.toFixed(9)));
+  const norths = new Set(cells.map((c) => c.north.toFixed(9)));
+  const wests = new Set(cells.map((c) => c.west.toFixed(9)));
+  const easts = new Set(cells.map((c) => c.east.toFixed(9)));
+  // A complete grid has one distinct boundary per row / per column, and the
+  // north edges are the south edges shifted up by one.
+  ok(norths.size === souths.size, `${name} has as many north edges as south edges`);
+  ok(easts.size === wests.size, `${name} has as many east edges as west edges`);
+  ok(
+    cells.length === souths.size * wests.size,
+    `${name} fills every cell of its ${souths.size}×${wests.size} grid exactly once`,
+    `${cells.length} cells`,
+  );
+  // Equal-sized bands on all four sides = an even grid (no seam, no overlap).
+  const cellH = (box.north - box.south) / souths.size;
+  const cellW = (box.east - box.west) / wests.size;
+  ok(
+    cells.every(
+      (c) =>
+        Math.abs(c.north - c.south - cellH) < Math.abs(cellH) * 1e-9 &&
+        Math.abs(c.east - c.west - cellW) < Math.abs(cellW) * 1e-9,
+    ),
+    `${name} rows and columns are evenly sized`,
+  );
+
+  let totalArea = 0;
+  for (const c of cells) totalArea += (c.north - c.south) * (c.east - c.west);
+  const boxArea = (box.north - box.south) * (box.east - box.west);
+  close(totalArea, boxArea, boxArea * 1e-9, `${name} cells cover the selection exactly`);
+}
+
+// A very small (or degenerate) box must not explode into thousands of cells.
+const tiny = planCells({ south: 22.3, west: 114.16, north: 22.30001, east: 114.16001 });
+ok(tiny.length === 1, "a tiny box stays one cell", String(tiny.length));
+
+// The 3D builders used to drop everything past the first 6,000 items, which is
+// what made a real city look half-empty. The remaining ceiling is a phone
+// safety valve only — it has to be far above any plausible course area.
+ok(
+  MAX_BUILDINGS >= 20_000,
+  "the building safety ceiling is not a data limit",
+  String(MAX_BUILDINGS),
+);
+ok(MAX_ROADS >= 20_000, "the road safety ceiling is not a data limit", String(MAX_ROADS));
 
 /* ---------------------------------------------------------------- *
  * 5. Terrain sampling

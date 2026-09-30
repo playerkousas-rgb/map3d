@@ -5,10 +5,13 @@
  * Kong (Central, 2026-09):
  *   1.1 km box →  702 buildings + 2,815 roads  → fetch in seconds
  *   2.2 km box → 2,123 buildings + 5,454 roads  → still comfortable
- *   5.5 km box → 7,797 buildings + 17,371 roads → ~20 s, timeout risk
- *  11   km box → 22,717 buildings + 42,965 roads → times out
- * So anything beyond a ~3 km side is flagged as "big" (fetch may time out)
- * and 1.5–3 km is flagged as "slow".
+ *   5.5 km box → 7,797 buildings + 17,371 roads → ~20 s as ONE query, so it is
+ *                                                     now split into cells
+ *  11   km box → 22,717 buildings + 42,965 roads → far too much for one query
+ *
+ * The verdict is therefore about **time, not failure**: a big area still
+ * loads in full, it just takes several smaller queries instead of one, and the
+ * map says so while it happens. 1.5–3 km reads "slow", beyond 3 km "big".
  */
 
 export interface AreaSize {
@@ -20,13 +23,13 @@ export interface AreaSize {
   areaM2: number;
   /** longer of the two sides, in metres */
   maxSideM: number;
-  /** "ok" = fast, "warn" = may be slow, "big" = fetch may time out */
+  /** "ok" = quick, "warn" = a few pieces, "big" = many pieces, slower */
   level: "ok" | "warn" | "big";
 }
 
-/** Side length beyond which dense-city fetches start to time out. */
+/** Side length beyond which the area is fetched as many pieces. */
 export const BIG_SIDE_M = 3000;
-/** Side length beyond which the fetch is noticeably slower. */
+/** Side length beyond which the fetch needs more than a couple of pieces. */
 export const WARN_SIDE_M = 1500;
 
 const M_PER_DEG_LAT = 110574;

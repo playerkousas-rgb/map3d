@@ -17,8 +17,18 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 - Roads rendered as solid meshes with widths based on highway type
 - Click a building to see its OSM info (name, height, address, translations...)
 - A base plate is generated underneath so exports are 3D-printable
-- Place / address search on the map (OpenStreetMap Nominatim)
-- Automatic fallback to mirror Overpass servers when the main one is busy (429 / 5xx / timeout)
+- Place / address search on the map (OpenStreetMap Nominatim) — a thumb-sized bar on a phone: 16 px field (no iOS zoom-on-focus), 44 px targets, results you can scroll with one finger
+- Automatic fallback to mirror Overpass servers when the main one is busy (429 / 5xx / timeout) or unreachable; a mirror that fails is put on a cooldown instead of being paid for again on every query
+
+### Where the map data comes from (and what is *not* limited)
+
+Buildings, roads, terrain, tiles and place search are all fetched **by the browser, straight from the public services** (Overpass, Open-Meteo / OpenTopoData, Lands Department, Nominatim). Vercel only serves the static `dist/` bundle — no request ever carries OSM data through it, so there is **no request-body size, response size or memory budget imposed by the host** to design around.
+
+The only limits that exist are the public services' own:
+
+- **A big selection is fetched in pieces.** One Overpass query over a large box is what used to make a city fail to load (the mirror runs out of time or memory and the whole response is lost). The box is now cut into a grid of ~1.2 km cells — see `planCells` in `src/utils/sceneData.ts` — and the cells are fetched with a small amount of concurrency. Each cell is published as it lands, so the city fills in while the rest is still loading and one failed cell never cancels the others. The map's size hint (`ok` / `slow` / `big`) is about **time, not failure**: nothing is left out.
+- **Nothing is silently truncated.** The 3D builders used to stop at 6,000 buildings / 6,000 roads, which quietly deleted most of a real city. That is gone; the only cap left is a 40,000 safety valve that logs a warning and shows `drawn / fetched` in the scene panel rather than pretending the data is complete.
+- A cell query that comes back flagged incomplete (server-side timeout) is **used as-is** instead of being thrown away.
 
 **Mode 2 — GPX → 3D Print Model（GPX → 3D 列印模型）**
 
