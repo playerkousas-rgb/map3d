@@ -53,6 +53,16 @@ export function TopNav() {
         >
           {t("appName")}
         </span>
+        <span
+          css={css({
+            fontSize: "11px",
+            fontWeight: "400",
+            color: "#9a9ba1",
+            letterSpacing: "0.02em",
+          })}
+        >
+          © Scout System
+        </span>
       </div>
 
       <div
@@ -65,14 +75,6 @@ export function TopNav() {
       >
         <NavButton isShow={true} onClick={toggleLang}>
           {t("langToggle")}
-        </NavButton>
-        <NavButton
-          isShow={true}
-          onClick={() =>
-            window.open("https://github.com/playerkousas-rgb/map3d")
-          }
-        >
-          {t("github")}
         </NavButton>
       </div>
     </div>

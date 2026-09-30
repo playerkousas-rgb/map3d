@@ -125,19 +125,49 @@ function RectangleSelector({
 export function MapComponent({
   onDone,
   onRemove,
+  isActive = true,
+  initialArea = null,
 }: {
   onDone: (e) => void;
   onRemove: () => void;
+  /** true while the parent fullscreen view is visible (Leaflet needs a nudge after display:none) */
+  isActive?: boolean;
+  /** previous selection (northEast, southWest) so a remounted map still shows the rectangle */
+  initialArea?: [any, any] | null;
 }) {
   const { t } = useI18n();
   const [isDrag, setIsDrag] = useState(true);
-  const [bounds, setBounds] = useState<LatLngBounds | null>(null);
-  const [drawBounds, setDrawBounds] = useState<LatLngBounds | null>(null);
+  const [bounds, setBounds] = useState<LatLngBounds | null>(
+    initialArea ? new LatLngBounds(initialArea[0], initialArea[1]) : null,
+  );
+  const [drawBounds, setDrawBounds] = useState<LatLngBounds | null>(
+    initialArea ? new LatLngBounds(initialArea[0], initialArea[1]) : null,
+  );
   const [map, setMap] = useState<L.Map | null>(null);
 
   const handleClickSwitchDrag = () => {
     setIsDrag(!isDrag);
   };
+
+  // The map lives inside a FullscreenModal that is merely display:none'd
+  // between steps. When it becomes visible again, Leaflet still thinks the
+  // container is 0×0 — without invalidateSize() the tiles render blank or
+  // misaligned, which looks like the app is broken. Also re-center on the
+  // user's previous rectangle so they can edit it right away.
+  useEffect(() => {
+    if (!isActive || !map) return;
+    const id = window.setTimeout(() => {
+      try {
+        map.invalidateSize();
+        if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+      } catch {
+        /* map container may already be gone during unmount */
+      }
+    }, 60);
+    return () => window.clearTimeout(id);
+    // Only re-sync when the view is re-activated — not on every draw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, map]);
 
   const handleClickRemoveBox = () => {
     onRemove();
@@ -225,6 +255,38 @@ export function MapComponent({
       </div>
 
       <MapSearch map={map} />
+
+      {/* Step-by-step hint so users always know what to do next */}
+      <div
+        css={css({
+          position: "absolute",
+          zIndex: 9998,
+          bottom: "1rem",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.45rem",
+          padding: "0.5rem 0.9rem",
+          borderRadius: "999px",
+          backgroundColor: bounds ? "#e6f4eaee" : "#ffffffee",
+          backdropFilter: "blur(8px)",
+          border: bounds
+            ? "1px solid #b7e1c3"
+            : "1px solid rgba(240, 240, 244, 0.51)",
+          boxShadow: "0 1px 8px rgba(0,0,0,0.12)",
+          fontSize: "13px",
+          color: bounds ? "#1e8e3e" : "#3c4043",
+          fontWeight: 500,
+          pointerEvents: "none",
+          maxWidth: "calc(100% - 2rem)",
+          textAlign: "center",
+          transition: "0.2s",
+        })}
+      >
+        <MousePointerClick css={css({ width: "14px", height: "14px", flexShrink: 0 })} />
+        {bounds ? t("mapHintReady") : t("mapHintEmpty")}
+      </div>
 
       <MapContainer
         ref={setMap}
