@@ -124,8 +124,6 @@ function App() {
 
   useEffect(() => {
     if (view === "orthoProcessing" && orthoReadOnly && orthoSettled) setView("ortho3d");
-    // handleOpenOrtho3d is stable enough for this purpose; only the flags matter
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, orthoReadOnly, orthoSettled]);
 
   const leavePlayMode = () => {
