@@ -243,6 +243,7 @@ export function MapComponent({
             backdropFilter: "blur(8px)",
             border: "none",
             padding: "0.5rem 1rem",
+            minHeight: "var(--tap)",
             borderRadius: "8px",
             outline: "#ef4444c2 solid 0.1rem",
             cursor: "pointer",
@@ -266,6 +267,7 @@ export function MapComponent({
             backdropFilter: "blur(8px)",
             border: "none",
             padding: "0.5rem 1rem",
+            minHeight: "var(--tap)",
             borderRadius: "8px",
             outline: isDrag
               ? "#086ad4c2 solid 0.1rem"
@@ -363,8 +365,11 @@ export function MapComponent({
         center={[22.32, 114.17]}
         zoom={13}
         style={{
-          height: "70vh",
+          // --map-h shortens on phones so the map, the search box and the
+          // buttons below it all fit on one screen.
+          height: "var(--map-h)",
           width: "100%",
+          borderRadius: "12px",
         }}
       >
         <TileLayer

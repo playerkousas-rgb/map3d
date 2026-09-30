@@ -1,5 +1,35 @@
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
 
+:root {
+  /* Safe-area insets: the app draws edge to edge (maps, 3D), so every floating
+     control has to stay clear of the notch and the home indicator. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Height of the fixed top bar, including any notch inset — overlays position
+     themselves against this instead of hard-coding a rem value. */
+  --topnav-h: calc(3rem + var(--safe-top));
+  /* Minimum comfortable touch target (Apple HIG / Material). */
+  --tap: 44px;
+  /* Height of the Leaflet selection map inside the front screen. */
+  --map-h: 70vh;
+}
+
+@media (max-width: 720px) {
+  :root {
+    /* On a phone the map and the buttons beneath it have to share one screen. */
+    --map-h: 52dvh;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --topnav-h: calc(3.25rem + var(--safe-top));
+  }
+}
+
 html,
 body,
 #root {
@@ -16,10 +46,19 @@ body,
   user-select: none;
   -ms-overflow-style: none;
   overflow: hidden;
+  /* No rubber-banding behind the fixed app frame on iOS. */
+  overscroll-behavior: none;
 }
 
-::-webkit-scrollbar {
-  display: none;
+/* Dynamic viewport units: 100vh is taller than the visible area on mobile
+   browsers with a retracting URL bar, which would push controls off-screen. */
+body {
+  height: 100dvh;
+}
+
+#root {
+  position: fixed;
+  inset: 0;
 }
 
 * {
@@ -27,4 +66,24 @@ body,
     BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI",
     "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+  /* The grey flash iOS paints over tapped controls looks broken over a map. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Text inputs are the one place a user must be able to select and paste. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+@media (pointer: coarse) {
+  /* Hover styles never trigger on touch and only cause sticky highlight. */
+  button:hover {
+    filter: none;
+  }
 }

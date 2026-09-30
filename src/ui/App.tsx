@@ -1,5 +1,9 @@
 import { css, keyframes } from "@emotion/react";
 import { Space } from "../three/Space";
+import { OrthoSpace } from "../three/OrthoSpace";
+import { CoursePanel } from "../components/orienteering/CoursePanel";
+import { OrthoOverlay } from "../components/orienteering/OrthoOverlay";
+import { useCourseStore } from "@/state/courseStore";
 import { GpxSpace, GpxModelSettings } from "../three/GpxSpace";
 import { FullscreenModal } from "../components/FullscreenModal";
 import { Title } from "@/components/text/Title";
@@ -18,6 +22,7 @@ import { Steps } from "@/components/text/Steps";
 import {
   ChevronLeft,
   ChevronRight,
+  Compass,
   Download,
   Loader2,
   Map,
@@ -46,8 +51,8 @@ from { transform: rotate(0deg); }
 to { transform: rotate(360deg); }
 `;
 
-type View = "front" | "processing" | "map3d" | "gpx3d";
-type Mode = "map" | "gpx";
+type View = "front" | "processing" | "map3d" | "gpx3d" | "ortho3d";
+type Mode = "map" | "gpx" | "ortho";
 
 /** Refuse absurdly large files before reading them into memory. */
 const MAX_GPX_BYTES = 50 * 1024 * 1024;
@@ -74,6 +79,13 @@ function App() {
   const [isFetchingBuildings, setIsFetchingBuildings] = useState(false);
   const [hasFetchedBuildings, setHasFetchedBuildings] = useState(false);
   const [fetchError, setFetchError] = useState<TranslationKey | null>(null);
+
+  // --- orienteering mode state ---
+  const setOrthoArea = useCourseStore((state) => state.setArea);
+  const orthoName = useCourseStore((state) => state.course.name);
+  const orthoControls = useCourseStore((state) => state.course.controls.length);
+  const orthoFileRef = useRef<HTMLInputElement>(null);
+  const [orthoError, setOrthoError] = useState(false);
 
   // --- gpx mode state ---
   const [gpxTrack, setGpxTrack] = useState<GpxTrack | null>(null);
@@ -161,10 +173,20 @@ function App() {
     }
   };
 
+  const handleOpenOrtho3d = () => {
+    if (areaData.length < 2) return;
+    setOrthoArea([
+      { lat: areaData[0].lat, lng: areaData[0].lng },
+      { lat: areaData[1].lat, lng: areaData[1].lng },
+    ]);
+    setView("ortho3d");
+  };
+
   const handleClickPrevStep = () => {
     // From the finished 3D scene, jump straight back to the map: the
     // previously circled rectangle is preserved, so the user can redraw it.
     if (view === "map3d") setView("front");
+    else if (view === "ortho3d") setView("front");
     else if (view === "processing") setView("front");
     else if (view === "gpx3d") {
       setView("front");
@@ -234,12 +256,20 @@ function App() {
       alignItems: "center",
       gap: "0.5rem",
       padding: "0.6rem 1.2rem",
-      borderRadius: "8px",
+      minHeight: "var(--tap)",
+      flex: 1,
+      justifyContent: "center",
+      borderRadius: "10px",
       border: "none",
       fontSize: "14px",
       fontWeight: 500,
       cursor: "pointer",
       transition: "0.2s",
+      "@media (max-width: 720px)": {
+        padding: "0.55rem 0.5rem",
+        fontSize: "12.5px",
+        gap: "0.35rem",
+      },
       color: active ? "#ffffff" : "#333333",
       backgroundColor: active ? "#007bffe8" : "#ffffff96",
       outline: active
@@ -270,17 +300,122 @@ function App() {
             <button css={modeTabStyle(mode === "gpx")} onClick={() => setMode("gpx")}>
               <Mountain css={IconSize} /> {t("modeGpx")}
             </button>
+            <button css={modeTabStyle(mode === "ortho")} onClick={() => setMode("ortho")}>
+              <Compass css={IconSize} /> {t("modeOrtho")}
+            </button>
           </Row>
 
-          {mode === "map" ? (
-            <MapComponent
-              onRemove={handleRemove}
-              onDone={handleDone}
-              isActive={view === "front"}
-              initialArea={
-                areaData.length === 2 ? [areaData[0], areaData[1]] : null
-              }
-            />
+          {mode !== "gpx" ? (
+            <Column gap="0.75rem">
+              <MapComponent
+                onRemove={handleRemove}
+                onDone={handleDone}
+                isActive={view === "front"}
+                initialArea={
+                  areaData.length === 2 ? [areaData[0], areaData[1]] : null
+                }
+              />
+
+              {mode === "ortho" && (
+                <Column gap="0.6rem">
+                  <Description>{t("orthoStepSelect")}</Description>
+                  <input
+                    value={orthoName}
+                    onChange={(event) => useCourseStore.getState().setName(event.target.value)}
+                    placeholder={t("orthoCourseNamePlaceholder")}
+                    aria-label={t("orthoCourseName")}
+                    maxLength={80}
+                    css={css({
+                      height: "var(--tap)",
+                      padding: "0 14px",
+                      borderRadius: "10px",
+                      border: "1px solid #dfe3e8",
+                      backgroundColor: "#ffffff",
+                      fontSize: "14px",
+                      fontWeight: 600,
+                      color: "#202124",
+                      outline: "none",
+                      ":focus": { borderColor: "#007bfe" },
+                    })}
+                  />
+                  <Row gap="0.5rem">
+                    <button
+                      type="button"
+                      disabled={isNextButtonDisabled}
+                      onClick={handleOpenOrtho3d}
+                      css={css({
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "0.5rem",
+                        minHeight: "var(--tap)",
+                        padding: "0 1rem",
+                        borderRadius: "10px",
+                        border: "none",
+                        fontSize: "14px",
+                        fontWeight: 600,
+                        color: "#ffffff",
+                        backgroundColor: isNextButtonDisabled ? "#9fb6cc" : "#007bfe",
+                        cursor: isNextButtonDisabled ? "not-allowed" : "pointer",
+                      })}
+                    >
+                      <Compass css={IconSize} /> {t("orthoOpen3d")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => orthoFileRef.current?.click()}
+                      css={css({
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "0.5rem",
+                        minHeight: "var(--tap)",
+                        padding: "0 1rem",
+                        borderRadius: "10px",
+                        border: "1px solid #dfe3e8",
+                        fontSize: "14px",
+                        fontWeight: 500,
+                        color: "#202124",
+                        backgroundColor: "#ffffff",
+                        cursor: "pointer",
+                      })}
+                    >
+                      <FileUp css={IconSize} /> {t("orthoImport")}
+                    </button>
+                  </Row>
+                  {orthoControls > 0 && (
+                    <Description>
+                      {orthoControls} {t("orthoControlCount")} ·{" "}
+                      {isNextButtonDisabled ? t("orthoStepSelect") : ""}
+                    </Description>
+                  )}
+                  {orthoError && (
+                    <div role="alert" css={css({ color: "#c5221f", fontSize: "13px" })}>
+                      {t("orthoImportFailed")}
+                    </div>
+                  )}
+                  <input
+                    ref={orthoFileRef}
+                    type="file"
+                    accept="application/json,.json"
+                    css={css({ display: "none" })}
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      try {
+                        useCourseStore.getState().importCourse(await file.text());
+                        setOrthoError(false);
+                      } catch (err) {
+                        console.warn("[map3d] course import failed:", err);
+                        setOrthoError(true);
+                      }
+                    }}
+                  />
+                </Column>
+              )}
+            </Column>
           ) : (
             <Column gap="0.75rem">
               <div
@@ -355,7 +490,7 @@ function App() {
 
       {/* ---------- Step buttons (map mode) ---------- */}
       <PrevButton
-        isShow={view !== "front"}
+        isShow={view !== "front" && view !== "ortho3d"}
         onClick={handleClickPrevStep}
       >
         <ChevronLeft css={IconSize} />{" "}
@@ -394,7 +529,7 @@ function App() {
         <div
           css={css({
             position: "fixed",
-            top: "4rem",
+            top: "calc(var(--topnav-h) + 8px)",
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 998,
@@ -411,6 +546,8 @@ function App() {
             color: "#5f6368",
             pointerEvents: "none",
             maxWidth: "calc(100vw - 2rem)",
+            // On a phone the GPX settings panel takes this corner of the screen.
+            ...(view === "gpx3d" ? { "@media (max-width: 720px)": { display: "none" } } : {}),
           })}
         >
           <Map css={css({ width: "13px", height: "13px", flexShrink: 0 })} />
@@ -481,10 +618,12 @@ function App() {
         <div
           css={css({
             position: "fixed",
-            top: "4rem",
-            right: "1rem",
+            top: "calc(var(--topnav-h) + 10px)",
+            right: "calc(1rem + var(--safe-right))",
             zIndex: 999,
             width: "260px",
+            maxHeight: "calc(100dvh - var(--topnav-h) - 8rem)",
+            overflowY: "auto",
             backgroundColor: "#ffffffdd",
             backdropFilter: "blur(12px)",
             borderRadius: "12px",
@@ -492,6 +631,12 @@ function App() {
             boxShadow: "0 2px 14px rgba(0,0,0,0.12)",
             fontSize: "13px",
             fontFamily: "system-ui, -apple-system, sans-serif",
+            "@media (max-width: 720px)": {
+              left: "calc(8px + var(--safe-left))",
+              right: "calc(8px + var(--safe-right))",
+              width: "auto",
+              maxHeight: "48dvh",
+            },
           })}
         >
           <div css={css({ fontWeight: 600, fontSize: "14px", marginBottom: "0.5rem" })}>
@@ -623,7 +768,13 @@ function App() {
       )}
 
       {/* ---------- 3D scenes ---------- */}
-      {view === "gpx3d" && gpxTrack ? (
+      {view === "ortho3d" ? (
+        <>
+          <OrthoSpace />
+          <OrthoOverlay onBack={() => setView("front")} />
+          <CoursePanel />
+        </>
+      ) : view === "gpx3d" && gpxTrack ? (
         <GpxSpace points={gpxTrack.points} settings={gpxSettings} />
       ) : (
         <Space />

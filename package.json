@@ -10,8 +10,9 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "guard": "node scripts/slim-guard.mjs repo",
-    "check": "npm run lint && npm run guard && npm run build",
-    "clean": "node scripts/clean.mjs"
+    "check": "npm run lint && npm run guard && npm run verify && npm run build",
+    "clean": "node scripts/clean.mjs",
+    "verify": "esbuild scripts/verify-orient.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=node_modules/.cache/verify-orient.mjs --log-level=warning && node node_modules/.cache/verify-orient.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

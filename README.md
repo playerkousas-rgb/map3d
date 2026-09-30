@@ -29,12 +29,27 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 - Track without elevation? One click fills it in from terrain data (Open-Meteo / Copernicus DEM, fallback OpenTopoData SRTM)
 - One-click STL export, ready for slicing & printing
 
+**Mode 3 — 3D City Orienteering（3D 城市定向 · 手機優先）**
+
+- Pick the course area on the map, then work in a 3D view of the real city
+- Checkpoints are drawn as the orienteering symbols — △ start, ○ control (with its number), ◎ finish — standing on the terrain, with the course line between them
+- Place by tapping the ground, drag a marker to move it, tap it to delete; each control carries a code, name, clue and score
+- Live leg information in the HM20C grid-reference style used on paper: `50Q KK 0834 6805`, 6-figure `KK 083 680`, planar leg distance and grid **and** magnetic bearing (3.1°W)
+- Ground is textured with the Lands Department Map API (iB20000 / HM20C-series basemap, aerial photography, or the OpenTopoMap countryside layer) draped over real terrain from Copernicus DEM / SRTM
+- A 1 km UTM grid traced along the hills, so distances can be judged in the scene
+- Courses import and export as JSON — the same shape the Scout System / HKMAP planner writes, so a course drafted on the desktop imports straight into the phone
+- One-tap **GLB / STL export** of the scene (ground, city, course line and markers) for a 3D print or for sharing
+
+**Mobile-first UI（手機優先）**
+
+The whole app is built to be driven with one thumb: 44 px minimum touch targets, `100dvh` layout with safe-area insets for notches and home indicators, panels that slide up as a draggable bottom sheet on phones and become side panels on a wide screen, and an on-screen camera rail (fit / top / tilt / zoom) beside the usual one-finger orbit and two-finger pinch.
+
 **Export formats:** GLB / glTF / OBJ / STL
 
 **Bilingual UI:** English / 繁體中文 (toggle in the top bar)
 
 > [!IMPORTANT]
-> 📢 <strong>This project cannot guarantee the accuracy of the data.</strong> Map data comes from OpenStreetMap; some building heights may be missing or incorrect.
+> 📢 <strong>This project cannot guarantee the accuracy of the data.</strong> Map data comes from OpenStreetMap; some building heights may be missing or incorrect. In the orienteering mode the 3D ground is drawn from the Lands Department Map API and the scene keeps the required credit *Map from Lands Department · Aerial Photograph from Lands Department* on screen; the underlying data is used under the [Lands Department Map API terms](https://portal.csdi.gov.hk/csdi-webpage/doc/TNC). Terrain heights come from Copernicus DEM / SRTM and are indicative only — always check the official map and the ground before an event.
 
 ## Development
 
@@ -49,7 +64,8 @@ npm run dev
 | `npm run build` | Type-check + production build + bundle budget check (`dist/`) |
 | `npm run lint` | ESLint |
 | `npm run guard` | Repository hygiene check (junk / oversized / unused files, deps, Vercel config) |
-| `npm run check` | `lint` + `guard` + `build` — run before every push (CI runs it too) |
+| `npm run verify` | Runs the orienteering verification harness (geodesy vs PROJ, course maths, tile maths, terrain sampling, geometry builders) |
+| `npm run check` | `lint` + `guard` + `verify` + `build` — run before every push (CI runs it too) |
 | `npm run clean` | Remove build output, caches and untracked junk (`-- --all` also removes `node_modules`, `-- --dry-run` only lists) |
 
 ## Deployment (Vercel) & slimming guards / 部署與瘦身防呆
@@ -72,6 +88,8 @@ npm run dev
 - Original map3d project by [cartesiancs](https://github.com/cartesiancs/map3d) (MIT License), created by Hyeong Jun Huh [(GitHub)](https://github.com/DipokalLab)
 - Multi-format export & solid-mesh road ideas merged from my `building3d` project
 - Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (Overpass API, Nominatim); elevation data from [Open-Meteo](https://open-meteo.com/) (Copernicus DEM GLO-90) and [OpenTopoData](https://www.opentopodata.org/) (SRTM)
+- Orienteering mode built on the data model and conventions of [Scout System · 香港城市定向地圖 (HKMAP)](https://github.com/playerkousas-rgb/HKMAP): the △ ○ ◎ control symbols, HM20C-style UTM grid references (`KK 0794 6642`), the 3.1°W magnetic declination and a course-JSON layout that round-trips between the two apps
+- Base map tiles © Hong Kong Special Administrative Region Government, Lands Department (Map API, iB20000-series); the countryside layer © [OpenTopoMap](https://opentopomap.org/) (CC-BY-SA)
 
 ## License
 
