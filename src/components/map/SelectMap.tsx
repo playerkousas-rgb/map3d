@@ -3,25 +3,48 @@ import {
   MapContainer,
   Rectangle,
   TileLayer,
+  useMap,
   useMapEvents,
 } from "react-leaflet";
 import L, { LatLng, LatLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { css } from "@emotion/react";
-import { CircleMinus, MousePointerClick } from "lucide-react";
+import { CircleMinus, MousePointerClick, Ruler } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { MapSearch } from "./MapSearch";
+import { AreaSize, fmtSize, measureArea } from "@/utils/measure";
 
 const IconSize = css({
   width: "14px",
   height: "14px",
 });
 
+/** Leaflet scale bar (m) so the user can judge distance at a glance. */
+function ScaleBar() {
+  const map = useMap();
+  useEffect(() => {
+    const control = L.control.scale({ metric: true, imperial: false, position: "bottomleft" });
+    control.addTo(map);
+    return () => {
+      control.remove();
+    };
+  }, [map]);
+  return null;
+}
+
+/** Rectangle stroke follows the size verdict: blue ok / amber slow / red too big. */
+const LEVEL_COLOR: Record<AreaSize["level"], string> = {
+  ok: "#007bff",
+  warn: "#f9ab00",
+  big: "#ea4335",
+};
+
 function RectangleSelector({
   isDrag = true,
 
   bounds,
   drawBounds,
+  level = "ok",
 
   onChange,
   onDrawChange,
@@ -30,6 +53,8 @@ function RectangleSelector({
 
   bounds: LatLngBounds | null;
   drawBounds: LatLngBounds | null;
+  /** size verdict — tints the rectangle so oversized selections stand out */
+  level?: AreaSize["level"];
 
   onChange: (bounds: LatLngBounds) => void;
   onDrawChange: (bounds: LatLngBounds) => void;
@@ -118,7 +143,7 @@ function RectangleSelector({
   }, [isDrag, map]);
 
   return drawBounds ? (
-    <Rectangle bounds={drawBounds} pathOptions={{ color: "blue" }} />
+    <Rectangle bounds={drawBounds} pathOptions={{ color: LEVEL_COLOR[level] }} />
   ) : null;
 }
 
@@ -175,6 +200,12 @@ export function MapComponent({
     setDrawBounds(null);
     setIsDrag(true);
   };
+
+  // Live size of the current selection — keeps the user aware of scale and
+  // warns (colour-coded) before they fire off an Overpass query that would
+  // time out.
+  const size: AreaSize | null = bounds ? measureArea(bounds.getNorthEast(), bounds.getSouthWest()) : null;
+  const level = size?.level ?? "ok";
 
   const handleChangeDone = (e) => {
     setBounds(e);
@@ -256,7 +287,8 @@ export function MapComponent({
 
       <MapSearch map={map} />
 
-      {/* Step-by-step hint so users always know what to do next */}
+      {/* Step-by-step hint + live measurement so users know the scale
+          of what they are circling (and before a query can time out) */}
       <div
         css={css({
           position: "absolute",
@@ -266,17 +298,33 @@ export function MapComponent({
           transform: "translateX(-50%)",
           display: "flex",
           alignItems: "center",
-          gap: "0.45rem",
+          gap: "0.5rem",
           padding: "0.5rem 0.9rem",
           borderRadius: "999px",
-          backgroundColor: bounds ? "#e6f4eaee" : "#ffffffee",
+          backgroundColor: !bounds
+            ? "#ffffffee"
+            : level === "big"
+              ? "#fce8e6ee"
+              : level === "warn"
+                ? "#fef7e0ee"
+                : "#e6f4eaee",
           backdropFilter: "blur(8px)",
-          border: bounds
-            ? "1px solid #b7e1c3"
-            : "1px solid rgba(240, 240, 244, 0.51)",
+          border: !bounds
+            ? "1px solid rgba(240, 240, 244, 0.51)"
+            : level === "big"
+              ? "1px solid #f9c9c3"
+              : level === "warn"
+                ? "1px solid #fde293"
+                : "1px solid #b7e1c3",
           boxShadow: "0 1px 8px rgba(0,0,0,0.12)",
           fontSize: "13px",
-          color: bounds ? "#1e8e3e" : "#3c4043",
+          color: !bounds
+            ? "#3c4043"
+            : level === "big"
+              ? "#c5221f"
+              : level === "warn"
+                ? "#b06000"
+                : "#1e8e3e",
           fontWeight: 500,
           pointerEvents: "none",
           maxWidth: "calc(100% - 2rem)",
@@ -285,7 +333,29 @@ export function MapComponent({
         })}
       >
         <MousePointerClick css={css({ width: "14px", height: "14px", flexShrink: 0 })} />
-        {bounds ? t("mapHintReady") : t("mapHintEmpty")}
+        {!bounds && <span>{t("mapHintEmpty")}</span>}
+        {bounds && size && (
+          <span
+            css={css({
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.35rem",
+              fontWeight: 700,
+            })}
+          >
+            <Ruler css={css({ width: "13px", height: "13px", flexShrink: 0 })} />
+            {fmtSize(size)}
+          </span>
+        )}
+        {bounds && (
+          <span>
+            {level === "big"
+              ? t("sizeBig")
+              : level === "warn"
+                ? t("sizeWarn")
+                : t("mapHintReady")}
+          </span>
+        )}
       </div>
 
       <MapContainer
@@ -301,9 +371,11 @@ export function MapComponent({
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <ScaleBar />
         <RectangleSelector
           bounds={bounds}
           drawBounds={drawBounds}
+          level={level}
           isDrag={isDrag}
           onChange={handleChangeDone}
           onDrawChange={handleChangeDraw}

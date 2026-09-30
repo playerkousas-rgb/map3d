@@ -33,6 +33,7 @@ import { useI18n, TranslationKey } from "@/i18n";
 import { parseGpx, GpxTrack } from "@/utils/gpx";
 import { ExportFormat } from "@/utils/exporters";
 import { normalizeBBox, overpassQuery } from "@/utils/overpass";
+import { fmtSize, measureArea } from "@/utils/measure";
 import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
 
 const IconSize = css({
@@ -93,9 +94,10 @@ function App() {
   const requestExport = useExportStore((state) => state.requestExport);
 
   const checkIsBig = () => {
-    const a = areaData[0].lat - areaData[1].lat;
-    const b = areaData[0].lng - areaData[1].lng;
-    return a + b > 0.1;
+    if (areaData.length < 2) return false;
+    // Data-backed limit: dense-city fetches start timing out past ~3 km per
+    // side (0.05° ≈ 7.8k buildings + 17k roads measured in Central, HK).
+    return measureArea(areaData[0], areaData[1]).level === "big";
   };
 
   const handleDone = (data: any) => {
@@ -421,7 +423,19 @@ function App() {
       <Modal isOpen={isWarnModal} onClose={() => setIsWarnModal(false)}>
         <Column gap="0.5rem">
           <Title>{t("tooBigTitle")}</Title>
+          {areaData.length === 2 && (
+            <div
+              css={css({
+                fontWeight: 700,
+                fontSize: "15px",
+                color: "#c5221f",
+              })}
+            >
+              {fmtSize(measureArea(areaData[0], areaData[1]))}
+            </div>
+          )}
           <Description>{t("tooBigDesc")}</Description>
+          <Description>{t("sizeBig")}</Description>
           <Button
             isShow={true}
             disabled={isNextButtonDisabled}

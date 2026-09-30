@@ -31,6 +31,9 @@ const dict = {
       "Click “Select Box”, then drag on the map to circle the area you want.",
     mapHintReady:
       "Area selected ✓ — drag again to adjust it, or press “Next Step” at the bottom right.",
+    sizeWarn: "The area is large — fetching the data may take a little longer.",
+    sizeBig:
+      "The area is too large — fetching may time out. Try keeping each side under 3 km.",
 
     // Steps
     stepLabel1: "① Circle an area",
@@ -124,6 +127,8 @@ const dict = {
     mapHintEmpty: "點擊右上角「框選區域」，再於地圖上拖曳圈出想要的範圍。",
     mapHintReady:
       "已圈選範圍 ✓ 可再拖曳調整，或按右下角「下一步」繼續。",
+    sizeWarn: "範圍較大，抓取資料可能需要較久。",
+    sizeBig: "範圍過大，抓取容易逾時 — 建議每邊縮到 3 公里以內。",
 
     // Steps
     stepLabel1: "① 圈選範圍",
