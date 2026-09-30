@@ -76,3 +76,7 @@ npm run dev
 ## License
 
 MIT License
+
+---
+
+**Copyright © Scout System**

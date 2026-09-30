@@ -11,14 +11,83 @@ import { useI18n } from "@/i18n";
 
 const scale = 51000;
 
+/** Highlight colour when a building is hovered / selected. */
+const HOVER_COLOR = "#007bff";
+
+/**
+ * Fallback palette for buildings without an OSM colour tag — soft,
+ * city-like tones so the scene is colourful instead of flat grey.
+ * Chosen deterministically per building id.
+ */
+const FALLBACK_WALL_COLORS = [
+  "#e8dcc8",
+  "#dcc9ae",
+  "#f0e6d6",
+  "#d9cfc0",
+  "#cfd5d8",
+  "#e5d4bc",
+  "#d8d0c4",
+  "#eae7e0",
+  "#c9d2cc",
+  "#e8d9c0",
+  "#ddd2c2",
+  "#e6e8ea",
+  "#f2ede4",
+  "#d0c8bc",
+  "#cdd8dd",
+  "#e4d8c6",
+];
+
+/**
+ * Validate any OSM `*:colour` tag against the browser's own CSS colour
+ * parser (`red`, `#a1b2c3`, `rgb(1 2 3)`…). Returns the value when it is a
+ * usable colour, otherwise null so callers can fall back.
+ */
+function cssColor(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (!v || v.length > 40 || /[;]/.test(v)) return null; // reject lists like "red; blue"
+  const probe = document.createElement("span");
+  probe.style.color = "";
+  probe.style.color = v;
+  return probe.style.color ? v : null;
+}
+
+/** Slightly darken a colour for the roof (lid faces of the extrusion). */
+function darken(hex: string, factor = 0.86): string {
+  const c = new THREE.Color(hex);
+  c.multiplyScalar(factor);
+  return `#${c.getHexString()}`;
+}
+
+/**
+ * Wall + roof colours for one building:
+ * OSM `building:colour` / `facade:colour` tags when present, otherwise a
+ * stable palette colour derived from the building id; the roof uses
+ * `roof:colour` when tagged, else a darker shade of the wall.
+ */
+function buildingColors(id: number, tags: any): { wall: string; roof: string } {
+  const wallTag =
+    cssColor(tags?.["building:colour"]) ??
+    cssColor(tags?.["building:color"]) ??
+    cssColor(tags?.["facade:colour"]) ??
+    cssColor(tags?.["facade:color"]);
+  const wall =
+    wallTag ?? FALLBACK_WALL_COLORS[Math.abs(Math.trunc(id)) % FALLBACK_WALL_COLORS.length];
+  const roofTag = cssColor(tags?.["roof:colour"]) ?? cssColor(tags?.["roof:color"]);
+  return { wall, roof: roofTag ?? darken(wall) };
+}
+
 function Building({
   shape,
   extrudeSettings,
   tags,
+  id,
 }: {
   shape: THREE.Shape;
   extrudeSettings: any;
   tags: any;
+  id: number;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -26,6 +95,9 @@ function Building({
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [showTranslations, setShowTranslations] = useState(false);
   const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
+
+  const { wall, roof } = useMemo(() => buildingColors(id, tags), [id, tags]);
+  const active = hovered || clicked;
 
   const tagLabels: { [key: string]: string } = {
     building: t("tagType"),
@@ -57,7 +129,19 @@ function Building({
       userData={{ exportable: true }}
     >
       <extrudeGeometry args={[shape, extrudeSettings]} />
-      <meshStandardMaterial color={hovered || clicked ? "#007bff" : "#9da0a3"} />
+      {/* group 0 = lid faces (roof), group 1 = extruded side faces (walls) */}
+      <meshStandardMaterial
+        attach="material-0"
+        color={active ? HOVER_COLOR : roof}
+        roughness={0.75}
+        metalness={0.05}
+      />
+      <meshStandardMaterial
+        attach="material-1"
+        color={active ? HOVER_COLOR : wall}
+        roughness={0.8}
+        metalness={0.05}
+      />
       {(hovered || clicked) && hoverPos && (
         <Html position={[hoverPos.x, hoverPos.y + extrudeSettings.depth + 0.5, hoverPos.z]} center>
           <div
@@ -410,6 +494,63 @@ function Roads({ area }: { area: any }) {
   );
 }
 
+/**
+ * Bright frame tracing the exact rectangle the user circled on the map,
+ * sitting on top of the base plate — so the finished 3D scene always shows
+ * which area was selected.
+ */
+function SelectionFrame({ area }: { area: any }) {
+  const geometry = useMemo(() => {
+    if (!area || area.length < 2) return null;
+    const refLat = (area[1].lat + area[0].lat) / 2;
+    const refLng = (area[1].lng + area[0].lng) / 2;
+    const cos = Math.cos((refLat * Math.PI) / 180);
+
+    const x1 = (area[1].lng - refLng) * scale * cos;
+    const x2 = (area[0].lng - refLng) * scale * cos;
+    const z1 = -(area[1].lat - refLat) * scale;
+    const z2 = -(area[0].lat - refLat) * scale;
+
+    const width = Math.abs(x2 - x1);
+    const depth = Math.abs(z2 - z1);
+    if (width < 1 || depth < 1) return null;
+
+    const bar = 1.6; // frame bar thickness
+    const height = 1.4; // frame sits slightly above the plate
+
+    const parts: THREE.BufferGeometry[] = [];
+    // bars along x (north/south edges)
+    for (const z of [Math.min(z1, z2), Math.max(z1, z2)]) {
+      const seg = new THREE.BoxGeometry(width + bar, height, bar);
+      seg.translate((x1 + x2) / 2, height / 2, z);
+      parts.push(seg);
+    }
+    // bars along z (east/west edges), inset to avoid doubling the corners
+    for (const x of [Math.min(x1, x2), Math.max(x1, x2)]) {
+      const seg = new THREE.BoxGeometry(bar, height, Math.max(depth - bar, bar));
+      seg.translate(x, height / 2, (z1 + z2) / 2);
+      parts.push(seg);
+    }
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((p) => p.dispose());
+    return merged;
+  }, [area]);
+
+  if (!geometry) return null;
+
+  return (
+    <mesh geometry={geometry} userData={{ exportable: true }}>
+      <meshStandardMaterial
+        color="#007bff"
+        emissive="#0052cc"
+        emissiveIntensity={0.35}
+        roughness={0.45}
+        metalness={0.1}
+      />
+    </mesh>
+  );
+}
+
 /** Base plate under the selected area — makes exported STL printable */
 function BasePlate({ area }: { area: any }) {
   const geometry = useMemo(() => {
@@ -461,6 +602,7 @@ export function Space() {
 
   const areaData = () => {
     const result: Array<{
+      id: number;
       shape: THREE.Shape;
       extrudeSettings: any;
       tags: any;
@@ -480,7 +622,7 @@ export function Space() {
         depth: heightValue,
         bevelEnabled: false,
       };
-      result.push({ shape, extrudeSettings, tags: bld.tags });
+      result.push({ id: bld.id ?? result.length, shape, extrudeSettings, tags: bld.tags });
     });
     return result;
   };
@@ -499,6 +641,7 @@ export function Space() {
       {buildingsData.map((item, index) => (
         <Building
           key={index}
+          id={item.id}
           shape={item.shape}
           extrudeSettings={item.extrudeSettings}
           tags={item.tags}
@@ -506,6 +649,7 @@ export function Space() {
       ))}
 
       <BasePlate area={realCenter} />
+      <SelectionFrame area={realCenter} />
       <Roads area={roadsArea} />
       <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
       <OrbitControls />

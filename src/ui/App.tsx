@@ -13,7 +13,8 @@ import {
   NextButton,
   PrevButton,
 } from "@/components/button/BottomButton";
-import { BuildingHeights, Building } from "@/components/map/Processing";
+import { FetchStatus, Building } from "@/components/map/Processing";
+import { Steps } from "@/components/text/Steps";
 import {
   ChevronLeft,
   ChevronRight,
@@ -32,6 +33,7 @@ import { useI18n, TranslationKey } from "@/i18n";
 import { parseGpx, GpxTrack } from "@/utils/gpx";
 import { ExportFormat } from "@/utils/exporters";
 import { normalizeBBox, overpassQuery } from "@/utils/overpass";
+import { fmtSize, measureArea } from "@/utils/measure";
 import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
 
 const IconSize = css({
@@ -92,9 +94,10 @@ function App() {
   const requestExport = useExportStore((state) => state.requestExport);
 
   const checkIsBig = () => {
-    const a = areaData[0].lat - areaData[1].lat;
-    const b = areaData[0].lng - areaData[1].lng;
-    return a + b > 0.1;
+    if (areaData.length < 2) return false;
+    // Data-backed limit: dense-city fetches start timing out past ~3 km per
+    // side (0.05° ≈ 7.8k buildings + 17k roads measured in Central, HK).
+    return measureArea(areaData[0], areaData[1]).level === "big";
   };
 
   const handleDone = (data: any) => {
@@ -159,7 +162,9 @@ function App() {
   };
 
   const handleClickPrevStep = () => {
-    if (view === "map3d") setView("processing");
+    // From the finished 3D scene, jump straight back to the map: the
+    // previously circled rectangle is preserved, so the user can redraw it.
+    if (view === "map3d") setView("front");
     else if (view === "processing") setView("front");
     else if (view === "gpx3d") {
       setView("front");
@@ -255,6 +260,7 @@ function App() {
           <Column gap="0.5rem">
             <Title>{t("frontTitle")}</Title>
             <Description>{t("frontDesc")}</Description>
+            {mode === "map" && <Steps current={1} />}
           </Column>
 
           <Row gap="0.5rem">
@@ -267,7 +273,14 @@ function App() {
           </Row>
 
           {mode === "map" ? (
-            <MapComponent onRemove={handleRemove} onDone={handleDone} />
+            <MapComponent
+              onRemove={handleRemove}
+              onDone={handleDone}
+              isActive={view === "front"}
+              initialArea={
+                areaData.length === 2 ? [areaData[0], areaData[1]] : null
+              }
+            />
           ) : (
             <Column gap="0.75rem">
               <div
@@ -325,19 +338,32 @@ function App() {
           <Column gap="0.5rem">
             <Title>{t("processingTitle")}</Title>
             <Description>{t("processingDesc")}</Description>
+            <Steps current={2} />
             {fetchError && (
               <div role="alert" css={css({ color: "#ef4444", fontSize: "13px" })}>
                 {t(fetchError)}
               </div>
             )}
-            <BuildingHeights buildings={buildings} loading={isFetchingBuildings} />
           </Column>
+          <FetchStatus
+            buildings={buildings}
+            loading={isFetchingBuildings}
+            fetched={hasFetchedBuildings}
+          />
         </Column>
       </FullscreenModal>
 
       {/* ---------- Step buttons (map mode) ---------- */}
-      <PrevButton isShow={view !== "front"} onClick={handleClickPrevStep}>
-        <ChevronLeft css={IconSize} /> {view === "gpx3d" ? t("gpxBack") : t("prevStep")}
+      <PrevButton
+        isShow={view !== "front"}
+        onClick={handleClickPrevStep}
+      >
+        <ChevronLeft css={IconSize} />{" "}
+        {view === "gpx3d"
+          ? t("gpxBack")
+          : view === "map3d"
+            ? t("editArea")
+            : t("prevStep")}
       </PrevButton>
 
       <NextButton
@@ -363,11 +389,53 @@ function App() {
         {t("export")} <Download css={IconSize} />
       </NextButton>
 
+      {/* ---------- 3D scene usage hint ---------- */}
+      {(view === "map3d" || view === "gpx3d") && (
+        <div
+          css={css({
+            position: "fixed",
+            top: "4rem",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 998,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            padding: "0.45rem 0.9rem",
+            borderRadius: "999px",
+            backgroundColor: "#ffffffcc",
+            backdropFilter: "blur(8px)",
+            border: "1px solid #e8eaed",
+            boxShadow: "0 1px 8px rgba(0,0,0,0.08)",
+            fontSize: "12.5px",
+            color: "#5f6368",
+            pointerEvents: "none",
+            maxWidth: "calc(100vw - 2rem)",
+          })}
+        >
+          <Map css={css({ width: "13px", height: "13px", flexShrink: 0 })} />
+          {view === "map3d" ? <Steps current={3} /> : null}
+          <span>{view === "gpx3d" ? t("sceneHintGpx") : t("sceneHint")}</span>
+        </div>
+      )}
+
       {/* ---------- Warn modal ---------- */}
       <Modal isOpen={isWarnModal} onClose={() => setIsWarnModal(false)}>
         <Column gap="0.5rem">
           <Title>{t("tooBigTitle")}</Title>
+          {areaData.length === 2 && (
+            <div
+              css={css({
+                fontWeight: 700,
+                fontSize: "15px",
+                color: "#c5221f",
+              })}
+            >
+              {fmtSize(measureArea(areaData[0], areaData[1]))}
+            </div>
+          )}
           <Description>{t("tooBigDesc")}</Description>
+          <Description>{t("sizeBig")}</Description>
           <Button
             isShow={true}
             disabled={isNextButtonDisabled}

@@ -11,7 +11,6 @@ export type Lang = "en" | "zh";
 const dict = {
   en: {
     appName: "🗺️ Map3d",
-    github: "GitHub",
     options: "Options",
     langToggle: "中文",
 
@@ -28,15 +27,34 @@ const dict = {
     selectBox: "Select Box",
     backToDrag: "Back to Drag",
     removeBox: "Remove Box",
+    mapHintEmpty:
+      "Click “Select Box”, then drag on the map to circle the area you want.",
+    mapHintReady:
+      "Area selected ✓ — drag again to adjust it, or press “Next Step” at the bottom right.",
+    sizeWarn: "The area is large — fetching the data may take a little longer.",
+    sizeBig:
+      "The area is too large — fetching may time out. Try keeping each side under 3 km.",
 
     // Steps
+    stepLabel1: "① Circle an area",
+    stepLabel2: "② Fetch building data",
+    stepLabel3: "③ View & export 3D",
     processingTitle: "Processing",
     processingDesc:
-      "Click Next Step to fetch building information. Once loaded, click Next Step again to view the 3D scene.",
+      "Two quick steps: press Next Step to fetch the data, then press it again to open the 3D view.",
     fetching: "Fetching...",
     fetchingBuildings: "Fetching building information...",
+    fetchIdle: "Press “Next Step” to fetch building data for the selected area.",
+    fetchSeconds: "Usually takes 2–10 seconds.",
+    buildingsLoaded: "Buildings loaded:",
+    readyFor3d: "Press “Next Step” again to open the 3D view.",
+    noBuildings:
+      "No buildings found in this area — continue to see roads, or go back and adjust the area.",
     nextStep: "Next Step",
     prevStep: "Prev Step",
+    editArea: "Edit selection",
+    sceneHint: "Drag to rotate · Scroll to zoom · Click a building for info",
+    sceneHintGpx: "Drag to rotate · Scroll to zoom · Use the panel to tune the model",
     export: "Export",
     tooBigTitle: "The area is too big",
     tooBigDesc: "Do you want to proceed?",
@@ -90,7 +108,6 @@ const dict = {
   },
   zh: {
     appName: "🗺️ Map3d",
-    github: "GitHub",
     options: "選項",
     langToggle: "EN",
 
@@ -107,15 +124,30 @@ const dict = {
     selectBox: "框選區域",
     backToDrag: "返回拖曳",
     removeBox: "移除選框",
+    mapHintEmpty: "點擊右上角「框選區域」，再於地圖上拖曳圈出想要的範圍。",
+    mapHintReady:
+      "已圈選範圍 ✓ 可再拖曳調整，或按右下角「下一步」繼續。",
+    sizeWarn: "範圍較大，抓取資料可能需要較久。",
+    sizeBig: "範圍過大，抓取容易逾時 — 建議每邊縮到 3 公里以內。",
 
     // Steps
+    stepLabel1: "① 圈選範圍",
+    stepLabel2: "② 抓取建築資料",
+    stepLabel3: "③ 檢視與匯出 3D",
     processingTitle: "處理中",
-    processingDesc:
-      "按「下一步」抓取建築物資料，完成後再按一次「下一步」進入 3D 場景。",
+    processingDesc: "兩個步驟：先按「下一步」抓取資料，完成後再按一次「下一步」開啟 3D 場景。",
     fetching: "抓取中...",
     fetchingBuildings: "正在抓取建築物資料...",
+    fetchIdle: "按右下角「下一步」，抓取所選範圍的建築物資料。",
+    fetchSeconds: "通常需要 2–10 秒。",
+    buildingsLoaded: "已載入建築物：",
+    readyFor3d: "再按一次「下一步」，即可開啟 3D 場景。",
+    noBuildings: "此範圍找不到建築物 — 可按下一步查看道路，或返回調整範圍。",
     nextStep: "下一步",
     prevStep: "上一步",
+    editArea: "修改圈選範圍",
+    sceneHint: "拖曳旋轉 · 滾輪縮放 · 點擊建築物查看資訊",
+    sceneHintGpx: "拖曳旋轉 · 滾輪縮放 · 右上面板可調整模型",
     export: "匯出",
     tooBigTitle: "選取範圍太大",
     tooBigDesc: "確定要繼續嗎？",
