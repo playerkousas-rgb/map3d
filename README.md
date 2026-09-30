@@ -39,6 +39,7 @@ A 3D mapping tool built with [React-Three-Fiber](https://github.com/pmndrs/react
 - A 1 km UTM grid traced along the hills, so distances can be judged in the scene
 - Courses import and export as JSON — the same shape the Scout System / HKMAP planner writes, so a course drafted on the desktop imports straight into the phone
 - One-tap **GLB / STL export** of the scene (ground, city, course line and markers) for a 3D print or for sharing
+- **Share with players（分享給玩家）** — one tap builds a `#play=…` link that carries the area and the whole course (compressed into the URL, nothing uploaded). Players open it and land straight in the 3D city in a read-only *player view*: they can orbit, tap a control to read its code / clue / grid reference, and export the GLB, but nothing can be moved or edited, and the link never overwrites a course saved on their own phone
 
 **Mobile-first UI（手機優先）**
 

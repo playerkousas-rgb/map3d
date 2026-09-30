@@ -13,7 +13,7 @@ import { Description } from "@/components/text/Description";
 import { Column } from "@/components/flex/Column";
 import { Row } from "@/components/flex/Row";
 import { MapComponent } from "@/components/map/SelectMap";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   NextButton,
@@ -42,6 +42,7 @@ import { ExportFormat } from "@/utils/exporters";
 import { normalizeBBox, overpassQuery } from "@/utils/overpass";
 import { fmtSize, measureArea } from "@/utils/measure";
 import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
+import { clearShareToken, decodeShare, readShareToken } from "@/utils/shareLink";
 
 const IconSize = css({
   width: "14px",
@@ -92,6 +93,46 @@ function App() {
   const orthoBuildingsState = useSceneStore((state) => state.buildings);
   const orthoBuildingCount = useSceneStore((state) => state.buildingCount);
   const orthoSettled = useSceneStore((state) => isSceneSettled(state));
+  const orthoReadOnly = useCourseStore((state) => state.readOnly);
+  const [playLinkInvalid, setPlayLinkInvalid] = useState(false);
+
+  // A player link (#play=…) opens straight into the shared course: load the
+  // scene, then auto-open the 3D view once it has arrived.
+  useEffect(() => {
+    const token = readShareToken();
+    if (!token) return;
+    let cancelled = false;
+    setMode("ortho");
+    setView("orthoProcessing");
+    decodeShare(token)
+      .then(({ area, course }) => {
+        if (cancelled) return;
+        useCourseStore.getState().enterPlayMode(course, area);
+        useSceneStore.getState().load(area);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("[map3d] share link rejected:", err);
+        clearShareToken();
+        setPlayLinkInvalid(true);
+        setView("front");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (view === "orthoProcessing" && orthoReadOnly && orthoSettled) setView("ortho3d");
+    // handleOpenOrtho3d is stable enough for this purpose; only the flags matter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, orthoReadOnly, orthoSettled]);
+
+  const leavePlayMode = () => {
+    useCourseStore.getState().exitPlayMode();
+    clearShareToken();
+    setView("front");
+  };
 
   // --- gpx mode state ---
   const [gpxTrack, setGpxTrack] = useState<GpxTrack | null>(null);
@@ -210,8 +251,10 @@ function App() {
     // From the finished 3D scene, jump straight back to the map: the
     // previously circled rectangle is preserved, so the user can redraw it.
     if (view === "map3d") setView("front");
-    else if (view === "ortho3d") setView("front");
-    else if (view === "orthoProcessing") setView("front");
+    else if (view === "ortho3d" || view === "orthoProcessing") {
+      if (orthoReadOnly) leavePlayMode();
+      else setView("front");
+    }
     else if (view === "processing") setView("front");
     else if (view === "gpx3d") {
       setView("front");
@@ -436,6 +479,11 @@ function App() {
                       {t("orthoImportFailed")}
                     </div>
                   )}
+                  {playLinkInvalid && (
+                    <div role="alert" css={css({ color: "#c5221f", fontSize: "13px" })}>
+                      {t("orthoPlayerInvalid")}
+                    </div>
+                  )}
                   <input
                     ref={orthoFileRef}
                     type="file"
@@ -533,9 +581,9 @@ function App() {
       <FullscreenModal isOpen={view === "orthoProcessing"}>
         <Column gap="1rem">
           <Column gap="0.5rem">
-            <Title>{t("orthoProcessingTitle")}</Title>
-            <Description>{t("orthoProcessingDesc")}</Description>
-            <Steps current={2} variant="ortho" />
+            <Title>{orthoReadOnly ? t("orthoPlayerLoading") : t("orthoProcessingTitle")}</Title>
+            <Description>{orthoReadOnly ? t("orthoPlayerHint") : t("orthoProcessingDesc")}</Description>
+            {!orthoReadOnly && <Steps current={2} variant="ortho" />}
           </Column>
           <OrthoProcessing />
         </Column>
@@ -549,13 +597,15 @@ function App() {
         <ChevronLeft css={IconSize} />{" "}
         {view === "gpx3d"
           ? t("gpxBack")
+          : orthoReadOnly
+            ? t("orthoPlayerExit")
           : view === "map3d"
             ? t("editArea")
             : t("prevStep")}
       </PrevButton>
 
       <NextButton
-        isShow={mode === "ortho" && (view === "front" || view === "orthoProcessing")}
+        isShow={mode === "ortho" && !orthoReadOnly && (view === "front" || view === "orthoProcessing")}
         disabled={
           view === "front"
             ? isNextButtonDisabled
@@ -851,7 +901,7 @@ function App() {
       {view === "ortho3d" ? (
         <>
           <OrthoSpace />
-          <OrthoOverlay onBack={() => setView("front")} />
+          <OrthoOverlay onBack={() => (orthoReadOnly ? leavePlayMode() : setView("front"))} />
           <CoursePanel />
         </>
       ) : view === "gpx3d" && gpxTrack ? (
