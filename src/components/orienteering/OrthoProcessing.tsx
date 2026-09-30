@@ -9,6 +9,7 @@
 import { css, keyframes } from "@emotion/react";
 import { AlertTriangle, Building2, CheckCircle2, Loader2, Mountain, RotateCw, Route } from "lucide-react";
 import { LoadState, ScenePart, useSceneStore } from "@/state/sceneStore";
+import type { CellProgress } from "@/utils/sceneData";
 import { useI18n, TranslationKey } from "@/i18n";
 
 const spin = keyframes`
@@ -23,6 +24,20 @@ export function OrthoProcessing() {
   const status = useSceneStore();
   const retry = useSceneStore((state) => state.retry);
 
+  // A big box is fetched as several small Overpass cells; show the tally so a
+  // long wait reads as "working" rather than "stuck", and say so out loud when
+  // only part of the area came back.
+  const tally = (state: LoadState, cells: CellProgress, count: number) => {
+    if (state === "loading" && cells.total > 1) {
+      return `${cells.done}/${cells.total} · ${count.toLocaleString("en-US")}`;
+    }
+    if (state === "ready" && cells.failed > 0) {
+      return `${count.toLocaleString("en-US")} · ${t("orthoCellsPartial")}`;
+    }
+    if (state === "ready") return count.toLocaleString("en-US");
+    return "";
+  };
+
   const rows: {
     part: ScenePart;
     icon: React.ReactNode;
@@ -36,18 +51,16 @@ export function OrthoProcessing() {
       label: "orthoBuildingCount",
       state: status.buildings,
       detail:
-        status.buildings === "ready"
-          ? status.buildingCount > 0
-            ? `${status.buildingCount}`
-            : t("orthoNoBuildingsHere")
-          : "",
+        status.buildings === "ready" && status.buildingCount === 0
+          ? t("orthoNoBuildingsHere")
+          : tally(status.buildings, status.buildingCells, status.buildingCount),
     },
     {
       part: "roads",
       icon: <Route css={ICON} />,
       label: "orthoRoadCount",
       state: status.roads,
-      detail: status.roads === "ready" ? `${status.roadCount}` : "",
+      detail: tally(status.roads, status.roadCells, status.roadCount),
     },
     {
       part: "terrain",

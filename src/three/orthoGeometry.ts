@@ -9,6 +9,13 @@
  * Everything is built in true metres and lifted to the terrain, so the massing
  * matches the ground the tiles are drawn on.
  *
+ * **Nothing is capped for the sake of speed.** The old 6,000-item cut-off
+ * silently threw away most of a real city, which is exactly the "the buildings
+ * and roads never load" symptom. What is left is a single high safety ceiling
+ * (40,000 — roughly a 9 km dense-city box, far past any course area) that
+ * exists so a pathological selection cannot lock up a phone, and it announces
+ * itself in the console instead of quietly hiding geometry.
+ *
  * These functions are pure (three.js only, no DOM), which keeps them testable
  * outside the browser.
  */
@@ -16,6 +23,10 @@
 import * as THREE from "three";
 import type { LocalProjection } from "@/utils/projection";
 import type { LatLng } from "@/utils/course";
+
+/** Safety ceiling only — no course area comes anywhere near this. */
+export const MAX_BUILDINGS = 40_000;
+export const MAX_ROADS = 40_000;
 
 /** Wall tones for buildings without an OSM colour — soft, city-like, HK-ish. */
 const WALL_PALETTE = [
@@ -64,7 +75,7 @@ export function buildBuildingsGeometry(
   groundHeight: HeightLookup,
   options: { maxBuildings?: number; minAreaM2?: number } = {},
 ): BuildingsGeometry {
-  const maxBuildings = options.maxBuildings ?? 6000;
+  const maxBuildings = Math.min(options.maxBuildings ?? MAX_BUILDINGS, MAX_BUILDINGS);
   const minAreaM2 = options.minAreaM2 ?? 12;
 
   const wallPos: number[] = [];
@@ -158,6 +169,13 @@ export function buildBuildingsGeometry(
     count++;
   }
 
+  if (count >= maxBuildings && buildings.length > count) {
+    console.warn(
+      `[map3d] safety ceiling hit: drew ${count} of ${buildings.length} buildings ` +
+        `(limit ${maxBuildings}) — select a smaller area to see the rest.`,
+    );
+  }
+
   return {
     walls: wallPos.length ? makeGeometry(wallPos, wallNorm, wallCol) : null,
     roofs: roofPos.length ? makeGeometry(roofPos, roofNorm, roofCol) : null,
@@ -179,7 +197,7 @@ export function buildRoadsGeometry(
   options: { lift?: number; maxRoads?: number } = {},
 ): THREE.BufferGeometry | null {
   const lift = options.lift ?? 0.6;
-  const maxRoads = options.maxRoads ?? 6000;
+  const maxRoads = Math.min(options.maxRoads ?? MAX_ROADS, MAX_ROADS);
   const positions: number[] = [];
   const normals: number[] = [];
   const colors: number[] = [];
@@ -219,7 +237,19 @@ export function buildRoadsGeometry(
     used++;
   }
 
-  return positions.length ? makeGeometry(positions, normals, colors) : null;
+  if (used >= maxRoads && roads.length > used) {
+    console.warn(
+      `[map3d] safety ceiling hit: drew ${used} of ${roads.length} roads ` +
+        `(limit ${maxRoads}) — select a smaller area to see the rest.`,
+    );
+  }
+
+  if (!positions.length) return null;
+  const geo = makeGeometry(positions, normals, colors);
+  // How many roads made it in, so the scene can say so instead of the user
+  // guessing why a corner of the map looks empty.
+  geo.userData.roadsDrawn = used;
+  return geo;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { css, keyframes } from "@emotion/react";
 import { CheckCircle2, Loader2, SearchX } from "lucide-react";
 import { useI18n } from "@/i18n";
+import type { CellProgress } from "@/utils/sceneData";
 
 export interface Building {
   id: number;
@@ -22,12 +23,18 @@ export function FetchStatus({
   buildings,
   loading,
   fetched,
+  cells,
 }: {
   buildings: Building[];
   loading: boolean;
   fetched: boolean;
+  /** how the area was cut up for Overpass (see utils/sceneData) */
+  cells?: CellProgress;
 }) {
   const { t } = useI18n();
+  const total = cells?.total ?? 0;
+  const done = cells?.done ?? 0;
+  const failed = cells?.failed ?? 0;
 
   return (
     <div
@@ -61,6 +68,35 @@ export function FetchStatus({
       {loading && (
         <div css={css({ fontSize: "12.5px", color: "#80868b", paddingLeft: "1.5rem" })}>
           {t("fetchSeconds")}
+        </div>
+      )}
+
+      {/* A large box is fetched as several small queries, so show the tally —
+          the number climbing is the clearest sign that it is working. */}
+      {loading && total > 1 && (
+        <div
+          css={css({
+            display: "flex",
+            alignItems: "center",
+            gap: "0.55rem",
+            fontSize: "12.5px",
+            color: "#1e8e3e",
+            fontWeight: 600,
+            paddingLeft: "1.5rem",
+          })}
+        >
+          <span>
+            {done} / {total}
+          </span>
+          <span css={css({ color: "#80868b", fontWeight: 400 })}>
+            {buildings.length.toLocaleString("en-US")} {t("orthoBuildingCount")}
+          </span>
+        </div>
+      )}
+
+      {!loading && fetched && failed > 0 && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
+          {t("orthoSomeCellsFailed")}
         </div>
       )}
 
