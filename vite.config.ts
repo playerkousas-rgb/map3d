@@ -24,7 +24,7 @@ function vendorChunk(id: string): string | undefined {
 
 // Production preview consumes the actual static-host security headers. Do not
 // apply script-src to Vite's dev-only inline React refresh preamble.
-const hosting = JSON.parse(readFileSync(new URL("./vercel.json", import.meta.url), "utf8"));
+const hosting = JSON.parse(readFileSync("./vercel.json", "utf8"));
 const productionHeaders = Object.fromEntries(hosting.headers
   .filter((rule: { source: string }) => rule.source === "/(.*)")
   .flatMap((rule: { headers: { key: string; value: string }[] }) => rule.headers.map(h => [h.key, h.value])));
