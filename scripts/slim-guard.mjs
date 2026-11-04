@@ -56,7 +56,7 @@ const VERCELIGNORE_REQUIRED = [".git", "node_modules", "dist", "*.log", "*.bak",
 const BUILD_INPUTS = [
   "index.html", "package.json", "package-lock.json", "vite.config.ts", "tsconfig.json",
   "tsconfig.app.json", "tsconfig.node.json", "vercel.json", "src/main.tsx",
-  "scripts/slim-guard.mjs", "scripts/vercel-ignore-build.mjs",
+  "scripts/slim-guard.mjs", "scripts/vercel-ignore-build.mjs", "scripts/patch-dxf-writer.mjs",
 ];
 
 /** Files browsers/crawlers request by convention, even if nothing links them. */

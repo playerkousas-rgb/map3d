@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 
 /**
@@ -21,11 +22,25 @@ function vendorChunk(id: string): string | undefined {
   return "vendor";
 }
 
+// Production preview consumes the actual static-host security headers. Do not
+// apply script-src to Vite's dev-only inline React refresh preamble.
+const hosting = JSON.parse(readFileSync(new URL("./vercel.json", import.meta.url), "utf8"));
+const productionHeaders = Object.fromEntries(hosting.headers
+  .filter((rule: { source: string }) => rule.source === "/(.*)")
+  .flatMap((rule: { headers: { key: string; value: string }[] }) => rule.headers.map(h => [h.key, h.value])));
+
 // https://vitejs.dev/config/
 export default defineConfig({
   server: {
     host: "0.0.0.0",
-    allowedHosts: true,
+    // Keep localhost/IP access and Arena previews without disabling the
+    // DNS-rebinding host check for arbitrary sites. Never use `true` here.
+    allowedHosts: [".e2b.app"],
+  },
+  preview: {
+    host: "0.0.0.0",
+    allowedHosts: [".e2b.app"],
+    headers: productionHeaders,
   },
   plugins: [
     react({

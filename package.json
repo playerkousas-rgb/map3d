@@ -1,24 +1,35 @@
 {
   "name": "map3d",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/slim-guard.mjs dist",
+    "dev": "node scripts/patch-dxf-writer.mjs --check && vite",
+    "build": "node scripts/patch-dxf-writer.mjs --check && tsc -b && vite build && node scripts/slim-guard.mjs dist",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "guard": "node scripts/slim-guard.mjs repo",
-    "check": "npm run lint && npm run guard && npm run verify && npm run build",
+    "check": "npm run verify:dxf-writer && npm run lint && npm run verify:lint && npm run guard && npm run verify && npm run verify:release && npm run build",
     "clean": "node scripts/clean.mjs",
-    "verify": "esbuild scripts/verify-orient.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=node_modules/.cache/verify-orient.mjs --log-level=warning && node node_modules/.cache/verify-orient.mjs"
+    "verify": "esbuild scripts/verify-orient.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=node_modules/.cache/verify-orient.mjs --log-level=warning && node node_modules/.cache/verify-orient.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs",
+    "audit:deps": "npm audit --omit=dev --audit-level=low && npm audit --audit-level=high",
+    "verify:ui:isolated": "node scripts/verify-ui-server.mjs",
+    "verify:lint": "node scripts/verify-lint.mjs",
+    "verify:csp": "node scripts/verify-csp-ui.mjs",
+    "postinstall": "node scripts/patch-dxf-writer.mjs",
+    "patch:dxf-writer": "node scripts/patch-dxf-writer.mjs",
+    "verify:dxf-writer": "node scripts/patch-dxf-writer.mjs --check && node scripts/verify-dxf-writer-patch.mjs",
+    "verify:cad": "node scripts/verify-cad.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@react-three/drei": "^10.0.2",
     "@react-three/fiber": "^9.0.4",
     "@vercel/analytics": "^2.0.1",
+    "dxf-writer": "1.18.4",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.475.0",
     "react": "^19.0.0",
@@ -29,18 +40,23 @@
   },
   "devDependencies": {
     "@emotion/babel-plugin": "^11.13.5",
-    "@eslint/js": "^9.19.0",
+    "@eslint/js": "^10.0.1",
     "@types/leaflet": "^1.9.16",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@types/three": "^0.173.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.19.0",
-    "eslint-plugin-react-hooks": "^5.0.0",
-    "eslint-plugin-react-refresh": "^0.4.18",
-    "globals": "^15.14.0",
+    "dxf-parser": "^1.1.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.14.0",
+    "playwright-core": "^1.58.2",
     "typescript": "~5.7.2",
-    "typescript-eslint": "^8.22.0",
-    "vite": "^6.1.0"
+    "typescript-eslint": "^8.72.1",
+    "vite": "^6.4.5"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
   }
 }

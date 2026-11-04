@@ -2,7 +2,7 @@
  * Orienteering course store.
  *
  * Holds the course being designed, which control is selected, the active tool
- * and how the 3D scene should be drawn. Everything a planner types is mirrored
+ * and how the 3D scene should be drawn. Planner changes attempt to save
  * into localStorage (same "no account, survives a refresh" behaviour as the
  * HKMAP planner), and undo/redo keeps a 50-step history of course snapshots.
  */
@@ -16,6 +16,9 @@ import {
   createControl,
   emptyCourse,
   parseCourseJson,
+  courseToJson,
+  courseIssue,
+  type CourseIssue,
 } from "@/utils/course";
 
 export type OrthoTool = "view" | "move" | "delete" | ControlKind;
@@ -34,6 +37,8 @@ export interface OrthoSceneOptions {
   /** vertical exaggeration applied to the terrain mesh */
   terrainExaggeration: number;
   showGrid: boolean;
+  showContours: boolean;
+  showHillshade: boolean;
   showRoute: boolean;
 }
 
@@ -50,33 +55,73 @@ const DEFAULT_SCENE: OrthoSceneOptions = {
   showTerrain: true,
   terrainExaggeration: 1,
   showGrid: true,
+  showContours: true,
+  showHillshade: true,
   showRoute: true,
 };
 
-function loadPersisted(): Persisted {
-  if (typeof localStorage === "undefined") {
-    return { course: emptyCourse(), scene: DEFAULT_SCENE, area: null };
+export type DraftStorageStatus = "ready" | "saving" | "unavailable" | "invalid" | "write-error" | "conflict";
+interface LoadedDraft extends Persisted {
+  storageStatus: DraftStorageStatus;
+  unreadableDraft: string | null;
+  /** Exact baseline; undefined means storage was never successfully read. */
+  storageBase: string | null | undefined;
+}
+
+function normalizeScene(value: unknown): OrthoSceneOptions {
+  const input = value as Partial<OrthoSceneOptions> | null;
+  const scene = { ...DEFAULT_SCENE };
+  for (const key of ["showBuildings", "showRoads", "showTerrain", "showGrid", "showContours", "showHillshade", "showRoute"] as const) {
+    if (typeof input?.[key] === "boolean") scene[key] = input[key];
   }
+  if (["hm20c", "imagery", "countryside", "plain"].includes(input?.groundLayer ?? "")) scene.groundLayer = input!.groundLayer!;
+  if (typeof input?.terrainExaggeration === "number" && Number.isFinite(input.terrainExaggeration) && input.terrainExaggeration >= .5 && input.terrainExaggeration <= 3) scene.terrainExaggeration = input.terrainExaggeration;
+  return scene;
+}
+
+function normalizeArea(value: unknown): [LatLng, LatLng] | null {
+  if (!Array.isArray(value) || value.length !== 2 || !value.every(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lng) && Math.abs(p.lat) <= 85 && Math.abs(p.lng) <= 180) || value[0].lat === value[1].lat || value[0].lng === value[1].lng) return null;
+  return [{ lat: value[0].lat, lng: value[0].lng }, { lat: value[1].lat, lng: value[1].lng }];
+}
+
+/** Pure reader for testable recovery: never writes/deletes an unreadable draft. */
+export function readPlannerDraft(storage: Pick<Storage, "getItem"> | null): LoadedDraft {
+  const fallback = (): LoadedDraft => ({ course: emptyCourse(), scene: { ...DEFAULT_SCENE }, area: null, storageStatus: "ready", unreadableDraft: null, storageBase: null });
+  let raw: string | null = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { course: emptyCourse(), scene: DEFAULT_SCENE, area: null };
+    if (!storage) return { ...fallback(), storageStatus: "unavailable", storageBase: undefined };
+    raw = storage.getItem(STORAGE_KEY);
+    if (raw === null) return fallback();
+    if (raw.length > 1_100_000) throw new Error("DRAFT_TOO_LARGE");
     const data = JSON.parse(raw);
-    const stored = data?.course;
-    const course =
-      stored?.controls?.length > 0
-        ? parseCourseJson(JSON.stringify(stored))
-        : emptyCourse(typeof stored?.name === "string" ? stored.name : "");
-    return {
-      course,
-      scene: { ...DEFAULT_SCENE, ...(data?.scene ?? {}) },
-      area: Array.isArray(data?.area) && data.area.length === 2 ? data.area : null,
-    };
+    return { course: parseCourseJson(JSON.stringify(data?.course), { allowEmpty: true }),
+      scene: normalizeScene(data?.scene), area: normalizeArea(data?.area), storageStatus: "ready", unreadableDraft: null, storageBase: raw };
   } catch {
-    return { course: emptyCourse(), scene: DEFAULT_SCENE, area: null };
+    return { ...fallback(), storageStatus: raw !== null ? "invalid" : "unavailable", unreadableDraft: raw, storageBase: raw === null ? undefined : raw };
   }
 }
 
-interface CourseStore extends Persisted {
+function loadPersisted(): LoadedDraft {
+  try { return readPlannerDraft(typeof localStorage === "undefined" ? null : localStorage); }
+  catch { return readPlannerDraft(null); }
+}
+
+interface CourseStore extends LoadedDraft {
+  externalDraft: string | null | undefined;
+  externalInvalid: boolean;
+  draftDirty: boolean;
+  saveRequest: number;
+  draftRevision: number;
+  checkStorage: () => void;
+  loadExternalDraft: (observed: string | null) => void;
+  overwriteExternalDraft: (observed: string | null) => void;
+  courseError: CourseIssue | null;
+  dismissCourseError: () => void;
+  exportCourseJson: () => string | null;
+  /** In-memory fallback preserves unsaved work while a player link is open. */
+  plannerSnapshot: Persisted | null;
+  retrySave: () => void;
+  replaceUnreadableDraft: () => void;
   /**
    * Player mode: the course arrived through a share link and is only viewed.
    * Nothing is editable and nothing is written to localStorage, so opening a
@@ -117,16 +162,59 @@ interface CourseStore extends Persisted {
   exitPlayMode: () => void;
 }
 
-function persist(state: CourseStore) {
-  if (typeof localStorage === "undefined") return;
+export function hasDraftWriteLock(): boolean {
+  return typeof navigator !== "undefined" && typeof navigator.locks?.request === "function";
+}
+
+let queuedSave: AbortController | null = null;
+function cancelQueuedSave() { queuedSave?.abort(); queuedSave = null; }
+
+/** A cooperative origin-scoped lock + exact baseline check, never last-writer-wins. */
+function persist(state: CourseStore, replacement?: { observed: string | null }) {
   if (state.readOnly) return;
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ course: state.course, scene: state.scene, area: state.area }),
-    );
-  } catch {
-    /* storage full or blocked — the app keeps working, it just stops remembering */
+  if (!replacement && (state.storageStatus === "invalid" || state.storageStatus === "conflict" || (state.unreadableDraft !== null && !["write-error", "saving"].includes(state.storageStatus)))) {
+    useCourseStore.setState({ draftDirty: true });
+    return;
+  }
+  if (!acceptCourse(state.course, courseError => useCourseStore.setState({ courseError }))) return;
+  const request = state.saveRequest + 1;
+  const revision = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  // Capture private data now, never read a public course after awaiting the lock.
+  const payload = JSON.stringify({ course: state.course, scene: state.scene, area: state.area, revision });
+  useCourseStore.setState({ saveRequest: request, draftDirty: true, storageStatus: "saving" });
+  const fail = () => {
+    if (useCourseStore.getState().saveRequest === request) useCourseStore.setState({ storageStatus: "write-error" });
+  };
+  const write = () => {
+    const current = useCourseStore.getState();
+    if (current.saveRequest !== request || current.readOnly) return;
+    try {
+      if (typeof localStorage === "undefined") throw new Error("STORAGE_UNAVAILABLE");
+      const actual = localStorage.getItem(STORAGE_KEY);
+      const expected = replacement ? replacement.observed : current.storageBase ?? null;
+      if (actual !== expected) {
+        useCourseStore.setState({ storageStatus: "conflict", externalDraft: actual, externalInvalid: false, draftDirty: true });
+        return;
+      }
+      localStorage.setItem(STORAGE_KEY, payload);
+      useCourseStore.setState({ storageBase: payload, storageStatus: "ready", unreadableDraft: null, externalDraft: undefined, externalInvalid: false, draftDirty: false });
+    } catch { fail(); }
+  };
+  if (hasDraftWriteLock()) {
+    cancelQueuedSave();
+    const controller = new AbortController();
+    queuedSave = controller;
+    try {
+      void navigator.locks.request(STORAGE_KEY, { mode: "exclusive", signal: controller.signal }, write)
+        .catch(() => { if (!controller.signal.aborted) fail(); })
+        .finally(() => { if (queuedSave === controller) queuedSave = null; });
+    } catch {
+      if (queuedSave === controller) queuedSave = null;
+      fail();
+    }
+  } else {
+    // No atomic compare-and-set exists in localStorage. UI warns to edit in one tab.
+    write();
   }
 }
 
@@ -138,23 +226,65 @@ function commit(
 ) {
   const state = get();
   if (state.readOnly) return;
+  const patch = mutate(state.course, state);
+  if (!acceptCourse(patch.course ?? state.course, error => set(() => ({ courseError: error })))) return;
   const snapshot = structuredClone(state.course);
-  set((current) => {
-    const patch = mutate(current.course, current);
-    const next: Partial<CourseStore> = {
-      ...patch,
-      past: [...current.past, snapshot].slice(-HISTORY_LIMIT),
-      future: [],
-    };
-    return next;
-  });
+  set(() => ({ ...patch, courseError: null, past: [...state.past, snapshot].slice(-HISTORY_LIMIT), future: [] }));
   persist(get());
+}
+
+/** Validate before changing course, selection, history or durable storage. */
+function acceptCourse(course: Course, reject: (error: CourseIssue) => void): boolean {
+  try { courseToJson(course); return true; }
+  catch (error) { reject(courseIssue(error)); return false; }
 }
 
 const initial = loadPersisted();
 
 export const useCourseStore = create<CourseStore>((set, get) => ({
   ...initial,
+  externalDraft: undefined,
+  externalInvalid: false,
+  draftDirty: false,
+  saveRequest: 0,
+  draftRevision: 0,
+  checkStorage: () => {
+    try {
+      if (typeof localStorage === "undefined") throw new Error("STORAGE_UNAVAILABLE");
+      const actual = localStorage.getItem(STORAGE_KEY);
+      const state = get();
+      if (actual !== (state.storageBase ?? null)) set({ storageStatus: "conflict", externalDraft: actual, externalInvalid: false, draftDirty: true, saveRequest: state.saveRequest + 1 });
+    } catch {
+      if (!["invalid", "conflict"].includes(get().storageStatus)) set({ storageStatus: "unavailable" });
+    }
+  },
+  loadExternalDraft: (observed) => {
+    if (get().readOnly || get().storageStatus !== "conflict") return;
+    try {
+      const actual = localStorage.getItem(STORAGE_KEY);
+      if (actual !== observed) { set({ externalDraft: actual, externalInvalid: false }); return; }
+      const loaded = readPlannerDraft({ getItem: () => actual });
+      if (loaded.storageStatus === "invalid") { set({ externalInvalid: true, externalDraft: actual }); return; }
+      set(state => ({ ...loaded, externalDraft: undefined, externalInvalid: false, draftDirty: false, saveRequest: state.saveRequest + 1, draftRevision: state.draftRevision + 1,
+        selectedId: null, tool: "view", past: [], future: [], courseError: null }));
+    } catch { set({ storageStatus: "unavailable" }); }
+  },
+  overwriteExternalDraft: (observed) => {
+    if (get().readOnly || get().storageStatus !== "conflict") return;
+    persist(get(), { observed });
+  },
+  courseError: null,
+  dismissCourseError: () => set({ courseError: null }),
+  exportCourseJson: () => {
+    try { return courseToJson(get().course); }
+    catch (error) { set({ courseError: courseIssue(error) }); return null; }
+  },
+  plannerSnapshot: null,
+  retrySave: () => persist(get()),
+  replaceUnreadableDraft: () => {
+    if (get().readOnly || get().storageStatus !== "invalid") return;
+    persist(get(), { observed: get().storageBase ?? null });
+  },
   readOnly: false,
   selectedId: null,
   tool: "view",
@@ -164,7 +294,9 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
 
   setName: (name) => {
     if (get().readOnly) return;
-    set((state) => ({ course: { ...state.course, name } }));
+    const course = { ...get().course, name };
+    if (!acceptCourse(course, courseError => set({ courseError }))) return;
+    set({ course, courseError: null });
     persist(get());
   },
 
@@ -183,6 +315,7 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   },
 
   setArea: (area) => {
+    if (get().readOnly) return;
     set({ area });
     persist(get());
   },
@@ -245,9 +378,11 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
 
   replaceCourse: (course) => {
     if (get().readOnly) return;
+    if (!acceptCourse(course, courseError => set({ courseError }))) return;
     const snapshot = structuredClone(get().course);
     set((state) => ({
       course,
+      courseError: null,
       selectedId: null,
       past: [...state.past, snapshot].slice(-HISTORY_LIMIT),
       future: [],
@@ -256,14 +391,17 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   },
 
   importCourse: (text) => {
+    if (get().readOnly) return;
     const course = parseCourseJson(text);
     get().replaceCourse(course);
   },
 
   newCourse: () => {
+    if (get().readOnly) return;
     const snapshot = structuredClone(get().course);
     set((state) => ({
       course: emptyCourse(""),
+      courseError: null,
       selectedId: null,
       tool: "view",
       past: [...state.past, snapshot].slice(-HISTORY_LIMIT),
@@ -273,8 +411,10 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   },
 
   resetAll: () => {
+    if (get().readOnly) return;
     set({
       course: emptyCourse(""),
+      courseError: null,
       selectedId: null,
       tool: "view",
       past: [],
@@ -285,10 +425,12 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   },
 
   undo: () => {
+    if (get().readOnly) return;
     const { past, course, future } = get();
     const previous = past[past.length - 1];
-    if (!previous) return;
+    if (!previous || !acceptCourse(previous, courseError => set({ courseError }))) return;
     set({
+      courseError: null,
       course: previous,
       past: past.slice(0, -1),
       future: [structuredClone(course), ...future].slice(0, HISTORY_LIMIT),
@@ -297,8 +439,12 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
     persist(get());
   },
 
-  enterPlayMode: (course, area) =>
-    set({
+  enterPlayMode: (course, area) => {
+    cancelQueuedSave();
+    set(state => ({
+      saveRequest: state.saveRequest + 1,
+      storageStatus: state.storageStatus === "saving" ? "write-error" : state.storageStatus,
+      plannerSnapshot: state.readOnly ? state.plannerSnapshot : structuredClone({ course: state.course, scene: state.scene, area: state.area }),
       readOnly: true,
       course,
       area,
@@ -307,13 +453,15 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
       panelSnap: "peek",
       past: [],
       future: [],
-    }),
+    }));
+  },
 
   exitPlayMode: () => {
     if (!get().readOnly) return;
-    const saved = loadPersisted();
+    const saved = get().plannerSnapshot ?? loadPersisted();
     set({
       readOnly: false,
+      plannerSnapshot: null,
       course: saved.course,
       area: saved.area,
       scene: saved.scene,
@@ -325,10 +473,12 @@ export const useCourseStore = create<CourseStore>((set, get) => ({
   },
 
   redo: () => {
+    if (get().readOnly) return;
     const { past, course, future } = get();
     const next = future[0];
-    if (!next) return;
+    if (!next || !acceptCourse(next, courseError => set({ courseError }))) return;
     set({
+      courseError: null,
       course: next,
       past: [...past, structuredClone(course)].slice(-HISTORY_LIMIT),
       future: future.slice(1),

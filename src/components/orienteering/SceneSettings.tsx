@@ -12,6 +12,7 @@ import { Check } from "lucide-react";
 import { GroundLayer, useCourseStore } from "@/state/courseStore";
 import { useSceneStore } from "@/state/sceneStore";
 import { useI18n, TranslationKey } from "@/i18n";
+import { SceneRecoveryRow } from "./SceneRecoveryRow";
 import { LANDSD_LINKS } from "@/utils/hkgeo";
 
 function Chip({
@@ -74,6 +75,7 @@ export function SceneSettings() {
     key: TranslationKey,
     drawn: number | null,
   ) => {
+    if (value === "idle") return `${t(key)} · ${t("orthoNotLoaded")}`;
     if (value === "loading") return `${t(key)} · ${t("orthoLoadingShort")}`;
     if (value === "error") return `${t(key)} · ${t("orthoFailedShort")}`;
     const fetched = count.toLocaleString("en-US");
@@ -133,10 +135,19 @@ export function SceneSettings() {
           <Chip active={scene.showTerrain} onClick={() => setScene({ showTerrain: !scene.showTerrain })}>
             {t("orthoShowTerrain")}
           </Chip>
+          <Chip active={scene.showContours} onClick={() => setScene({ showContours: !scene.showContours })}>
+            {t("orthoShowContours")}
+          </Chip>
+          <Chip active={scene.showHillshade} onClick={() => setScene({ showHillshade: !scene.showHillshade })}>
+            {t("orthoShowHillshade")}
+          </Chip>
           <Chip active={scene.showGrid} onClick={() => setScene({ showGrid: !scene.showGrid })}>
             {t("orthoShowGrid")}
           </Chip>
         </div>
+        <p css={css({ margin: "6px 0 0", fontSize: "12px", lineHeight: 1.5, color: "#5f6368" })}>
+          {t("orthoTerrainFlatHint")}
+        </p>
       </section>
 
       <section css={css({ display: "flex", flexDirection: "column", gap: "4px" })}>
@@ -145,6 +156,8 @@ export function SceneSettings() {
           <span>× {scene.terrainExaggeration.toFixed(1)}</span>
         </div>
         <input
+          aria-label={t("orthoExaggeration")}
+          aria-valuetext={`× ${scene.terrainExaggeration.toFixed(1)}`}
           type="range"
           min={0.5}
           max={3}
@@ -152,11 +165,12 @@ export function SceneSettings() {
           value={scene.terrainExaggeration}
           disabled={!scene.showTerrain}
           onChange={(event) => setScene({ terrainExaggeration: parseFloat(event.target.value) })}
-          css={css({ width: "100%", height: "32px", ":disabled": { opacity: 0.4 } })}
+          css={css({ width: "100%", height: "44px", ":disabled": { opacity: 0.4 } })}
         />
       </section>
 
       <section
+        aria-label={t("orthoDataStatus")}
         css={css({
           display: "flex",
           flexDirection: "column",
@@ -167,29 +181,50 @@ export function SceneSettings() {
           paddingTop: "10px",
         })}
       >
-        <span>
+        <SceneRecoveryRow part="buildings" label="orthoBuildingCount" state={status.buildings} failed={status.buildingCells.failed} total={status.buildingCells.total}>
           {layerNote(
             status.buildings,
             status.buildingCount,
             "orthoBuildingCount",
             scene.showBuildings ? status.drawnBuildings : null,
           )}
-        </span>
-        <span>
+        </SceneRecoveryRow>
+        {!!status.buildingCells.flatHippedRoofs && (
+          <span role="status" css={css({ color: "#b06000" })}>
+            {status.buildingCells.flatHippedRoofs} {t("buildingHippedFlat")}
+          </span>
+        )}
+        {!!status.buildingCells.flatPyramidalRoofs && (
+          <span role="status" css={css({ color: "#b06000" })}>
+            {status.buildingCells.flatPyramidalRoofs} {t("buildingPyramidalFlat")}
+          </span>
+        )}
+        {!!status.buildingCells.flatSkillionRoofs && (
+          <span role="status" css={css({ color: "#b06000" })}>
+            {status.buildingCells.flatSkillionRoofs} {t("buildingSkillionFlat")}
+          </span>
+        )}
+        {!!status.buildingCells.skippedBuildings && (
+          <span role="status" css={css({ color: "#b06000" })}>
+            {status.buildingCells.skippedBuildings} {t("buildingGeometrySkipped")}
+          </span>
+        )}
+        <SceneRecoveryRow part="roads" label="orthoRoadCount" state={status.roads} failed={status.roadCells.failed} total={status.roadCells.total}>
           {layerNote(
             status.roads,
             status.roadCount,
             "orthoRoadCount",
             scene.showRoads ? status.drawnRoads : null,
           )}
-        </span>
-        <span>
+        </SceneRecoveryRow>
+        <SceneRecoveryRow part="terrain" label="orthoTerrainRange" state={status.terrain}>
           {status.terrain === "ready"
             ? `${t("orthoTerrainRange")} ${status.terrainMin}–${status.terrainMax} m · ${status.terrainSource}`
             : status.terrain === "loading"
               ? `${t("orthoTerrainRange")} · ${t("orthoLoadingShort")}`
-              : `${t("orthoTerrainRange")} · ${t("orthoFailedShort")}`}
-        </span>
+              : `${t("orthoTerrainRange")} · ${t(status.terrain === "idle" ? "orthoNotLoaded" : "orthoFailedShort")}`}
+        </SceneRecoveryRow>
+        {status.terrain === "error" && <span role="status" css={css({ color: "#b06000" })}>{t("orthoTerrainUnavailableHint")}</span>}
         <span css={css({ color: "#9aa0a6", marginTop: "6px" })}>{t("orthoAttribution")}</span>
       </section>
     </div>

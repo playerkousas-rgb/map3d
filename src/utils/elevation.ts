@@ -10,7 +10,7 @@
  * (docs/world-scout.md). At most MAX_SAMPLES points are looked up; the rest
  * of the track is interpolated by distance, so a request stays small.
  */
-import { GpxPoint, GpxTrack, computeGpxStats, haversine } from "./gpx";
+import { GpxPoint, GpxTrack, computeGpxStats, haversine, isGpxElevation } from "./gpx";
 
 const OPEN_METEO_URL = "https://api.open-meteo.com/v1/elevation";
 const OPEN_TOPO_DATA_URL = "https://api.opentopodata.org/v1/srtm30m";
@@ -58,7 +58,10 @@ async function getJson(url: string): Promise<any> {
 }
 
 const coord = (n: number) => n.toFixed(5);
-const finiteOr0 = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const requireElevation = (value: unknown): number => {
+  if (!isGpxElevation(value)) throw new Error("Missing/invalid elevation response");
+  return value;
+};
 
 async function fromOpenMeteo(points: GpxPoint[]): Promise<number[]> {
   const out: number[] = [];
@@ -71,7 +74,7 @@ async function fromOpenMeteo(points: GpxPoint[]): Promise<number[]> {
     if (!Array.isArray(data?.elevation) || data.elevation.length !== batch.length) {
       throw new Error("unexpected Open-Meteo response");
     }
-    out.push(...data.elevation.map(finiteOr0));
+    out.push(...data.elevation.map(requireElevation));
   }
   return out;
 }
@@ -92,7 +95,7 @@ async function fromOpenTopoData(points: GpxPoint[]): Promise<number[]> {
     ) {
       throw new Error("unexpected OpenTopoData response");
     }
-    out.push(...data.results.map((r: any) => finiteOr0(r?.elevation)));
+    out.push(...data.results.map((r: any) => requireElevation(r?.elevation)));
   }
   return out;
 }
@@ -133,5 +136,5 @@ export async function fillTrackElevation(track: GpxTrack): Promise<ElevationResu
 
   const elevations = interpolate(track.points, idx, values);
   const points = track.points.map((p, i) => ({ ...p, ele: elevations[i] }));
-  return { track: { points, stats: computeGpxStats(points, track.stats.name) }, source };
+  return { track: { ...track, points, missingElevationCount: 0, stats: computeGpxStats(points, track.stats.name) }, source };
 }

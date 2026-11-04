@@ -1,3 +1,24 @@
+import { verifyModelCamera } from "./verify-model-camera";
+import { verifyZeroRoofLevels } from './verify-zero-roof-levels';
+import { verifyPlaceSearch } from "./verify-place-search";
+import { verifySceneRecovery } from "./verify-scene-recovery";
+import { verifyTerrainIntegrity } from "./verify-terrain-integrity";
+import { verifyHippedAngle } from './verify-hipped-angle';
+import { verifyHippedNodes } from './verify-hipped-nodes';
+import { verifyHipped } from './verify-hipped';
+import { verifyGeoJsonCollections } from './verify-geojson-collections';
+import { verifyGpx } from "./verify-gpx";
+import { verifyCsp } from "./verify-csp";
+import { verifyPyramidal } from "./verify-pyramidal";
+import { verifyExportVisibility } from "./verify-export-visibility";
+import { verifyBuildingElevation } from "./verify-building-elevation";
+import { verifySkillion } from "./verify-skillion";
+import { verifyBuildingIslands } from "./verify-building-islands";
+import { verifyBuildingHoles } from "./verify-building-holes";
+import { verifyPanelLayout } from "./verify-panel-layout";
+import { verifyInputFlows } from "./verify-inputs";
+import { verifyCourseBudgets } from "./verify-course-budget";
+import { verifyDraftConflicts } from "./verify-draft-conflicts";
 /**
  * Verification harness for the orienteering modules that do not need a browser:
  * geodesy, course maths, tile maths, terrain sampling and the geometry builders.
@@ -35,7 +56,9 @@ import {
 import { latToTileY, lngToTileX, tileXToLng, tileYToLat, chooseZoom, tileRange } from "../src/utils/tiles";
 import { planCells } from "../src/utils/sceneData";
 import { MAX_BUILDINGS, MAX_ROADS } from "../src/three/orthoGeometry";
-import { heightAt, fieldRange, type HeightField } from "../src/utils/terrain";
+import { heightAt, fieldRange, hillshadeValues, buildContourGeometry, type HeightField } from "../src/utils/terrain";
+import { verifyGisAndExports } from "./verify-gis";
+import { verifyBuildingExports } from "./verify-buildings";
 import { createProjection } from "../src/utils/projection";
 import {
   buildBuildingsGeometry,
@@ -353,6 +376,62 @@ const range2 = fieldRange(field);
 ok(range2.min === 0 && range2.max === 120, "field range", `${range2.min}–${range2.max}`);
 
 /* ---------------------------------------------------------------- *
+ * 5b. GeoLibre-style hillshade and mesh-aligned contours
+ * ---------------------------------------------------------------- */
+console.log("\n[5b] Hillshade and contours");
+const flat = { ...field, cols: 3, rows: 3, heights: Array(9).fill(25) };
+ok(hillshadeValues(flat).every(v => v === 180), "flat DEM = round(255 × sin 45°)");
+ok(hillshadeValues(flat, { altitude: 90 }).every(v => v === 255), "overhead sun fully lights flat terrain");
+ok(hillshadeValues(flat, { altitude: 0 }).every(v => v === 0), "horizon sun does not light flat terrain");
+const northSlope = { ...flat, heights: [0, 0, 0, 100, 100, 100, 200, 200, 200] };
+const eastSlope = { ...flat, heights: [0, 100, 200, 0, 100, 200, 0, 100, 200] };
+ok(hillshadeValues(northSlope, { azimuth: 180 })[4] > hillshadeValues(northSlope, { azimuth: 0 })[4],
+  "south-facing slope is brighter under southern sun (south-first rows)");
+ok(hillshadeValues(eastSlope, { azimuth: 270 })[4] > hillshadeValues(eastSlope, { azimuth: 90 })[4],
+  "west-facing slope is brighter under western sun");
+const northGradient = 200 / ((flat.north - flat.south) * 111320);
+close(hillshadeValues(northSlope, { azimuth: 180 })[4],
+  Math.round(255 * (1 + northGradient) / Math.sqrt(2 * (1 + northGradient ** 2))), 0,
+  "Horn interior matches analytic planar hillshade");
+ok(hillshadeValues(northSlope, { zFactor: 0 }).every(v => v === 180), "zero exaggeration removes relief");
+ok(hillshadeValues(northSlope, { azimuth: 675 }).every((v, i) => v === hillshadeValues(northSlope)[i]),
+  "azimuth wraps after 360 degrees");
+function rejectsTerrain(fn: () => unknown, label: string) {
+  let rejected = false;
+  try { fn(); } catch { rejected = true; }
+  ok(rejected, label);
+}
+rejectsTerrain(() => hillshadeValues({ ...flat, heights: [NaN] }), "malformed/NoData field is rejected");
+rejectsTerrain(() => hillshadeValues(flat, { altitude: 91 }), "invalid sun altitude is rejected");
+const contourProjection = createProjection([{ lat: flat.south, lng: flat.west }, { lat: flat.north, lng: flat.east }]);
+const plateauContours = buildContourGeometry(flat, contourProjection);
+ok(plateauContours.getAttribute("position").count === 0, "flat plateaus produce no arbitrary contours");
+plateauContours.dispose();
+const rampContours = buildContourGeometry(northSlope, contourProjection, { interval: 50, segments: 4, exaggeration: 2, lift: 0.35 });
+const contourPos = rampContours.getAttribute("position");
+ok(contourPos.count > 0 && contourPos.count % 2 === 0, "contours are independent line-segment pairs");
+let aligned = true, nonzero = true, within = true;
+for (let i = 0; i < contourPos.count; i += 2) {
+  nonzero &&= Math.hypot(contourPos.getX(i) - contourPos.getX(i + 1), contourPos.getZ(i) - contourPos.getZ(i + 1)) > 1e-6;
+  for (let j = i; j < i + 2; j++) {
+    const level = (contourPos.getY(j) - 0.35) / 2;
+    aligned &&= Math.abs(level / 50 - Math.round(level / 50)) < 1e-6;
+    const ll = contourProjection.toLatLng(contourPos.getX(j), contourPos.getZ(j));
+    aligned &&= Math.abs(heightAt(northSlope, ll) - level) < 0.01;
+    within &&= ll.lat >= flat.south - 1e-7 && ll.lat <= flat.north + 1e-7 && ll.lng >= flat.west - 1e-7 && ll.lng <= flat.east + 1e-7;
+  }
+}
+ok(aligned, "contour vertices lie at true 50 m intervals on the exaggerated terrain");
+ok(nonzero && within, "contours have no zero-length segments and stay inside DEM bounds");
+rampContours.dispose();
+const saddleContours = buildContourGeometry({ ...flat, cols: 2, rows: 2, heights: [0, 100, 100, 0] }, contourProjection, { interval: 50, base: 25, segments: 1 });
+ok(saddleContours.getAttribute("position").count === 8, "saddle cell follows the ground's two triangles without ambiguous crossings");
+saddleContours.dispose();
+rejectsTerrain(() => buildContourGeometry(northSlope, contourProjection, { interval: 0 }), "zero contour interval is rejected");
+rejectsTerrain(() => buildContourGeometry(northSlope, contourProjection, { interval: 0.001 }), "excessive contour levels are capped");
+rejectsTerrain(() => buildContourGeometry(northSlope, contourProjection, { segments: 1.5 }), "fractional mesh resolution is rejected");
+
+/* ---------------------------------------------------------------- *
  * 6. Geometry builders
  * ---------------------------------------------------------------- */
 console.log("\n[6] Geometry builders");
@@ -487,6 +566,30 @@ const route = buildRouteGeometry(
 ok(route !== null && route!.getAttribute("position").count > 100, "the course line is a tube with geometry");
 ok((route!.getIndex()?.count ?? 0) % 3 === 0, "tube triangles come in triples");
 ok(buildRouteGeometry([{ lat: 22.29, lng: 114.16 }], projection, terrain) === null, "a one-point route builds nothing");
+
+verifyBuildingExports(ok, close);
+await verifyBuildingHoles(ok, close);
+verifyBuildingIslands(ok, close);
+await verifySkillion(ok, close);
+await verifyZeroRoofLevels(ok, close);
+verifyModelCamera(ok);
+await verifyBuildingElevation(ok, close);
+await verifyExportVisibility(ok, close);
+await verifyPyramidal(ok, close);
+verifyCsp(ok);
+await verifyGpx(ok);
+await verifyTerrainIntegrity(ok);
+await verifySceneRecovery(ok);
+await verifyPlaceSearch(ok);
+await verifyGeoJsonCollections(ok);
+await verifyHipped(ok, close);
+verifyHippedNodes(ok, close);
+await verifyHippedAngle(ok, close);
+await verifyGisAndExports(ok);
+await verifyInputFlows(ok);
+verifyCourseBudgets(ok);
+verifyPanelLayout(ok);
+await verifyDraftConflicts(ok);
 
 console.log(`\n${failures === 0 ? "✅" : "❌"} ${checks - failures}/${checks} checks passed`);
 if (failures > 0) process.exitCode = 1;

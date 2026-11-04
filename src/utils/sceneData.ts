@@ -1,3 +1,4 @@
+import { buildingDimensions, needsSkillionDirectionFallback } from "./builders/buildingBuilder";
 /**
  * Scene data for the orienteering 3D view: real building footprints, road
  * centrelines and terrain heights for the area a planner selected.
@@ -21,19 +22,22 @@
  * that answers is handed to the caller immediately, so the city fills in while
  * the rest is still loading, and a cell that fails only costs that cell.
  *
- * There is deliberately **no size cap**: the data is fetched by the browser
- * straight from Overpass and never passes through the hosting provider, so the
- * only limits worth designing around are Overpass's own patience. What was
- * removed instead is the old hard cut-off that quietly dropped everything
- * past the first few thousand items.
+ * There is deliberately **no fetch/response size cap**: data travels directly
+ * from Overpass, not through the hosting provider. Provider limits and device
+ * safety govern the result. Footprint topology/complexity rejection is reported
+ * in progress, unlike the removed hard cut-off after a few thousand items.
  */
 
 import { BBox, LatLngLike, normalizeBBox, overpassQuery } from "./overpass";
 import type { LatLng } from "./course";
+import { createProjection } from "./projection";
+import { parseOsmBuildings, type OsmBuildingFootprint } from "./osmBuildings";
 
 export interface SceneBuilding {
   id: number;
-  /** real-world height in metres (OSM `height`, else `building:levels`, else 10 m) */
+  key?: string;
+  holes?: LatLng[][];
+  /** real-world height in metres (OSM `height`, else estimated storeys + roof, else 10 m) */
   heightM: number;
   /** lowest terrain height across the footprint, filled in by the scene */
   tags: Record<string, string>;
@@ -50,6 +54,14 @@ export interface SceneRoad {
 
 /** Progress of a multi-cell fetch, reported as each cell lands. */
 export interface CellProgress {
+  /** Valid skillion components displayed flat because the downhill direction is missing/invalid. */
+  flatSkillionRoofs?: number;
+  /** Unsupported pyramidal roof components preserved as explicitly reported flat roofs. */
+  flatPyramidalRoofs?: number;
+  /** Hipped components outside the conservative rectangle/rise subset. */
+  flatHippedRoofs?: number;
+  /** Unsupported/incomplete building objects, never replaced with filled outers. */
+  skippedBuildings?: number;
   /** how many cells are in this fetch (1 = the whole box fit in one query) */
   total: number;
   /** how many cells have been answered (or have failed) so far */
@@ -58,20 +70,12 @@ export interface CellProgress {
   failed: number;
 }
 
-/** A building exactly as the map-mode 3D view wants it (unfiltered). */
-export interface RawBuilding {
-  id: number;
-  tags: { [key: string]: string | undefined };
-  geometry?: { lat: number; lng: number }[];
-}
+/** Validated map-mode footprint; unsupported objects are reported in progress. */
+export type RawBuilding = OsmBuildingFootprint;
 
-/** Real height of a building from its OSM tags — levels are worth 2.2 m each. */
+/** Total roof-inclusive height; explicit height wins over estimated storeys. */
 export function buildingHeightM(tags: Record<string, string> | undefined): number {
-  const levels = parseFloat(tags?.["building:levels"] ?? "");
-  if (Number.isFinite(levels) && levels > 0) return levels * 2.2;
-  const height = parseFloat(String(tags?.height ?? "").replace(/[^\d.]/g, ""));
-  if (Number.isFinite(height) && height > 0) return Math.min(height, 400);
-  return 10;
+  return buildingDimensions(tags).totalHeight;
 }
 
 /**
@@ -245,27 +249,21 @@ export async function fetchBuildings(
   area: [LatLngLike, LatLngLike],
   onProgress?: (buildings: SceneBuilding[], progress: CellProgress) => void,
 ): Promise<SceneBuilding[]> {
-  const collect = (elements: any[]) => {
-    const out: SceneBuilding[] = [];
-    for (const element of elements) {
-      const geometry = element.geometry;
-      if (!Array.isArray(geometry) || geometry.length < 3) continue;
-      out.push({
-        id: element.id ?? out.length,
-        heightM: buildingHeightM(element.tags),
-        tags: element.tags ?? {},
-        ring: geometry.map((pt: any) => ({ lat: pt.lat, lng: pt.lon })),
-      });
-    }
-    return out;
+  const projection = createProjection([{ lat: area[0].lat, lng: area[0].lng }, { lat: area[1].lat, lng: area[1].lng }]);
+  const project = (p: LatLng) => projection.toScene(p.lat, p.lng);
+  const collect = (elements: unknown[]) => {
+    const parsed = parseOsmBuildings(elements, project);
+    return { buildings: parsed.buildings.map(({ geometry, resolvedHeightM, ...b }) => ({ ...b, ring: geometry, heightM: resolvedHeightM ?? buildingHeightM(b.tags) })),
+      skippedBuildings: parsed.issues.length, flatHippedRoofs: parsed.buildings.filter(b => b.flatHippedRoof).length, flatPyramidalRoofs: parsed.buildings.filter(b => b.flatPyramidalRoof).length, flatSkillionRoofs: parsed.buildings.filter(b => needsSkillionDirectionFallback(b.tags)).length };
   };
-
   const elements = await fetchCells(
-    normalizeBBox(area[0], area[1]),
-    buildingsQuery,
-    onProgress ? (all, progress) => onProgress(collect(all), progress) : undefined,
+    normalizeBBox(area[0], area[1]), buildingsQuery,
+    onProgress ? (all, progress) => {
+      const result = collect(all);
+      onProgress(result.buildings, { ...progress, skippedBuildings: result.skippedBuildings, flatHippedRoofs: result.flatHippedRoofs, flatPyramidalRoofs: result.flatPyramidalRoofs, flatSkillionRoofs: result.flatSkillionRoofs });
+    } : undefined,
   );
-  return collect(elements);
+  return collect(elements).buildings;
 }
 
 /** Fetch road centrelines (everything a walker can use, motorway down to steps). */
@@ -301,26 +299,21 @@ export async function fetchRoads(
 
 /**
  * Raw building elements in the shape the map-mode 3D view wants
- * (`{ id, tags, geometry }`, unfiltered — every OSM building, whatever its
- * size). Shares the same cell planner, so a large selection loads here too.
+ * (`{ id, key, tags, geometry, holes }`). Invalid/unsupported topology is
+ * reported through progress rather than filled. Uses the same cell planner.
  */
 export async function fetchBuildingElements(
   area: [LatLngLike, LatLngLike],
   onProgress?: (buildings: RawBuilding[], progress: CellProgress) => void,
 ): Promise<RawBuilding[]> {
-  const collect = (elements: any[]): RawBuilding[] =>
-    elements.map((element: any, index: number) => ({
-      id: element.id ?? index,
-      tags: element.tags ?? {},
-      geometry: Array.isArray(element.geometry)
-        ? element.geometry.map((pt: any) => ({ lat: pt.lat, lng: pt.lon }))
-        : undefined,
-    }));
-
+  const refLat = (area[0].lat + area[1].lat) / 2, refLng = (area[0].lng + area[1].lng) / 2;
+  const project = (p: LatLng) => ({ x: (p.lng - refLng) * 111320 * Math.cos(refLat * Math.PI / 180), z: -(p.lat - refLat) * 111320 });
   const elements = await fetchCells(
-    normalizeBBox(area[0], area[1]),
-    buildingsQuery,
-    onProgress ? (all, progress) => onProgress(collect(all), progress) : undefined,
+    normalizeBBox(area[0], area[1]), buildingsQuery,
+    onProgress ? (all, progress) => {
+      const result = parseOsmBuildings(all, project);
+      onProgress(result.buildings, { ...progress, skippedBuildings: result.issues.length, flatHippedRoofs: result.buildings.filter(b => b.flatHippedRoof).length, flatPyramidalRoofs: result.buildings.filter(b => b.flatPyramidalRoof).length, flatSkillionRoofs: result.buildings.filter(b => needsSkillionDirectionFallback(b.tags)).length });
+    } : undefined,
   );
-  return collect(elements);
+  return parseOsmBuildings(elements, project).buildings;
 }

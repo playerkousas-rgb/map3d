@@ -1,0 +1,113 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import DxfParser from 'dxf-parser';
+
+/** Real UI import/edit/backup/player flow; map APIs remain mocked by the caller. */
+export async function verifyCourseUi(page, { base, output, width, pass }) {
+  await page.goto(base);
+  await page.getByRole('button', { name: '3D Orienteering', exact: true }).click();
+  const course = { name: 'Private draft', playMode: 'linear', controls: [
+    { id: 'start', kind: 'start', lat: 22.319, lng: 114.169, code: 'S', name: 'Start gate', clue: 'Gate', note: 'PRIVATE NOTE', score: 0 },
+    { id: 'one', kind: 'control', lat: 22.32, lng: 114.17, code: '31', name: 'Checkpoint one', clue: 'Lamp', note: 'PRIVATE NOTE', score: 10 },
+    { id: 'finish', kind: 'finish', lat: 22.321, lng: 114.171, code: 'F', name: 'Finish gate', clue: 'Exit', note: '', score: 0 },
+  ] };
+  await page.locator('input[type=file][accept="application/json,.json"]').setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(course)) });
+  await page.waitForFunction(() => globalThis.document.querySelector('input[aria-label="Course name"]')?.value === 'Private draft');
+  await page.getByRole('button', { name: 'Select Box', exact: true }).click();
+  const map = page.locator('.leaflet-container');
+  await map.scrollIntoViewIfNeeded();
+  const box = await map.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 8 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Get 3D scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Open 3D anyway', exact: true }).click();
+  const name = page.getByRole('textbox', { name: 'Course name', exact: true });
+  await name.waitFor();
+  await name.fill('Edited draft');
+  if (width < 900) {
+    const handle = page.getByRole('button', { name: 'Resize course panel', exact: true });
+    await handle.focus();
+    await handle.press('End');
+    assert.equal(await handle.getAttribute('aria-expanded'), 'true');
+  }
+  pass(`${width}px: course JSON import, actual area drag, failed-service fallback and keyboard panel expansion`);
+  await page.getByRole('button', { name: /Checkpoint one/ }).click();
+  await page.getByLabel('Clue', { exact: true }).fill('Updated clue');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Redo', exact: true }).isEnabled(), true);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  const state = await page.evaluate(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course);
+  assert.equal(state.controls.find(c => c.id === 'one').clue, 'Updated clue');
+  pass(`${width}px: visible control editing, undo and redo preserve course content`);
+  await page.getByRole('toolbar', { name: '3D Orienteering', exact: true }).getByRole('button', { name: 'Control', exact: true }).click();
+  await page.locator('canvas[aria-label="3D Orienteering Course"]').waitFor();
+  await page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))));
+  await page.waitForFunction(({ x, y }) => globalThis.document.elementFromPoint(x, y)?.tagName === 'CANVAS', { x: width * 0.5, y: 390 });
+  await page.mouse.click(width * 0.5, 390);
+  await page.waitForFunction(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course.controls.length === 4);
+  await page.waitForFunction(() => [...globalThis.document.querySelectorAll('input')].some(input => input.value === '32' && input.inputMode === 'numeric'));
+  await page.getByRole('button', { name: 'Delete', exact: true }).last().click();
+  await page.waitForFunction(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course.controls.length === 3);
+  assert.deepEqual(await page.evaluate(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course.controls), state.controls, 'placing/deleting a new control must leave all original controls and edits intact');
+  await page.getByRole('toolbar', { name: '3D Orienteering', exact: true }).getByRole('button', { name: 'View', exact: true }).click();
+  if (width < 900) await page.getByRole('button', { name: 'Resize course panel', exact: true }).press('End');
+  pass(`${width}px: actual 3D ground tap places a control; editor deletion restores the course`);
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export JSON', exact: true }).click();
+  const download = await downloadEvent;
+  const backup = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
+  assert.equal(backup.course.name, 'Edited draft');
+  assert.equal(backup.course.controls[0].note, 'PRIVATE NOTE');
+  await page.locator('canvas[aria-label="3D Orienteering Course"]').waitFor();
+  await page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))));
+  await page.screenshot({ path: path.join(output, `course-${width}.png`) });
+  pass(`${width}px: actual downloaded course backup retains planner notes and edits`);
+  const cadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'DXF · R2010', exact: true }).click();
+  const cad = await cadEvent;
+  const parsed = new DxfParser().parseSync(await fs.readFile(await cad.path(), 'utf8'));
+  assert.equal(parsed.header.$ACADVER, 'AC1024');
+  assert.equal(parsed.header.$INSUNITS, 6);
+  assert(parsed.entities.length > 100 && parsed.entities.every(entity => entity.type === '3DFACE'));
+  await page.locator('.export-status').getByRole('button', { name: 'Dismiss', exact: true }).click();
+  pass(`${width}px: orienteering ground/course DXF download is non-empty R2010 with metre units`);
+  const saved = await page.evaluate(() => globalThis.localStorage.getItem('map3d.orienteering.v1'));
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByRole('button', { name: 'Share with players', exact: true }).click();
+  await page.getByText('Link copied — send it to the players.', { exact: true }).waitFor();
+  const shareUrl = await page.evaluate(() => globalThis.navigator.clipboard.readText());
+  assert(new URL(shareUrl).hash.startsWith('#play='));
+  pass(`${width}px: actual Share action creates and copies the player link`);
+  await page.goto(shareUrl);
+  await page.getByText('Player view · read only', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('textbox', { name: 'Course name', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('toolbar', { name: '3D Orienteering', exact: true }).count(), 0);
+  assert.equal(await page.evaluate(() => globalThis.localStorage.getItem('map3d.orienteering.v1')), saved);
+  assert(await page.evaluate(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course.controls.every(c => c.note === '')));
+  const publicControls = await page.evaluate(async () => (await import('/src/state/courseStore.ts')).useCourseStore.getState().course.controls);
+  assert.deepEqual(publicControls, backup.course.controls.map(control => ({ ...control, note: '' })));
+  await page.locator('canvas[aria-label="3D Orienteering Course"]').waitFor();
+  await page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))));
+  await page.screenshot({ path: path.join(output, `player-${width}.png`) });
+  pass(`${width}px: real player URL opens read-only, strips notes and leaves the private draft untouched`);
+  await page.reload();
+  await page.getByText('Player view · read only', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => globalThis.localStorage.getItem('map3d.orienteering.v1')), saved);
+  pass(`${width}px: fresh page load also opens player mode without overwriting the saved draft`);
+  await page.getByRole('button', { name: 'Pick another area', exact: true }).click();
+  assert.equal(new URL(page.url()).hash, '');
+  assert.equal(await page.getByRole('textbox', { name: 'Course name', exact: true }).inputValue(), 'Edited draft');
+  assert.equal(await page.evaluate(() => globalThis.localStorage.getItem('map3d.orienteering.v1')), saved);
+  pass(`${width}px: leaving player mode clears the token and restores the planner draft`);
+  assert.equal(await page.getByRole('button', { name: 'Get 3D scene', exact: true }).isEnabled(), true);
+  await page.locator('.leaflet-overlay-pane path').first().waitFor({ state: 'attached' });
+  await page.goto(`${base}/#play=jbroken`);
+  await page.getByRole('alert').filter({ hasText: 'This link is not a valid course.' }).waitFor();
+  assert.equal(new URL(page.url()).hash, '');
+  assert.equal(await page.getByRole('textbox', { name: 'Course name', exact: true }).inputValue(), 'Edited draft');
+  assert.equal(await page.evaluate(() => globalThis.localStorage.getItem('map3d.orienteering.v1')), saved);
+  pass(`${width}px: invalid same-page link fails visibly, clears its token and preserves the planner draft`);
+}

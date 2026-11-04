@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useId, useRef, useState } from "react";
 import { css, keyframes } from "@emotion/react";
 import type { Map as LeafletMap } from "leaflet";
 import { Loader2, Search, X } from "lucide-react";
@@ -68,19 +68,32 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [message, setMessage] = useState<Message | null>(null);
   const requestRef = useRef(0);
+  const pending = useRef<AbortController | null>(null);
+  const messageId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const close = useCallback(() => {
+    requestRef.current++;
+    pending.current?.abort(); pending.current = null;
+    setLoading(false);
     setResults([]);
     setMessage(null);
   }, []);
+
+  useLayoutEffect(() => {
+    const revision = requestRef;
+    return () => {
+      revision.current++; pending.current?.abort(); pending.current = null;
+      if (map?.getContainer().isConnected) map.stop();
+    };
+  }, [map]);
 
   const flyTo = (place: PlaceResult) => {
     close();
     // Hand the screen back to the map: on a phone the keyboard would
     // otherwise cover the place we just flew to.
     inputRef.current?.blur();
-    if (!map) return;
+    if (!map?.getContainer().isConnected) return;
     if (place.bounds) map.flyToBounds(place.bounds, { maxZoom: 17, duration: 0.8 });
     else map.flyTo([place.lat, place.lon], 16, { duration: 0.8 });
   };
@@ -91,44 +104,47 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
     if (!map) return;
     const onClick = () => close();
     map.on("click", onClick);
+    map.on("movestart", onClick);
+    map.on("zoomstart", onClick);
     return () => {
       map.off("click", onClick);
+      map.off("movestart", onClick);
+      map.off("zoomstart", onClick);
     };
   }, [map, close]);
 
   const clear = () => {
-    requestRef.current++;
-    setQuery("");
-    setResults([]);
-    setMessage(null);
-    setLoading(false);
+    close(); setQuery(""); inputRef.current?.focus();
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (!q || loading) return;
+    if (!q || loading || pending.current || !map) return;
 
     const id = ++requestRef.current;
+    const controller = new AbortController(); pending.current = controller;
+    const current = () => id === requestRef.current && !controller.signal.aborted &&
+      pending.current === controller && map.getContainer().isConnected && !window.location.hash.startsWith("#play=");
     setLoading(true);
     setMessage(null);
     setResults([]);
     try {
       const b = map?.getBounds();
       const found = await searchPlaces(q, {
-        lang,
+        lang, signal: controller.signal,
         viewbox: b ? [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] : undefined,
       });
-      if (id !== requestRef.current) return;
+      if (!current()) return;
       if (found.length === 0) setMessage("searchNoResults");
       else if (found.length === 1) flyTo(found[0]);
       else setResults(found);
     } catch (err) {
-      if (id !== requestRef.current) return;
+      if (!current()) return;
       console.warn("[map3d] Place search failed:", err);
       setMessage("searchFailed");
     } finally {
-      if (id === requestRef.current) setLoading(false);
+      if (pending.current === controller) { pending.current = null; setLoading(false); }
     }
   };
 
@@ -159,6 +175,7 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
     >
       <form
         role="search"
+        aria-busy={loading}
         onSubmit={submit}
         css={css({
           display: "flex",
@@ -178,6 +195,7 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
           value={query}
           placeholder={t("searchPlaceholder")}
           aria-label={t("search")}
+          aria-describedby={message ? messageId : undefined}
           enterKeyHint="search"
           // A place name is not a sentence: the OS must not autocomplete,
           // autocorrect or capitalise it, and must not fire searches as the
@@ -187,8 +205,7 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
           autoCapitalize="off"
           spellCheck={false}
           onChange={(e) => {
-            setQuery(e.target.value);
-            setMessage(null);
+            close(); setQuery(e.target.value);
           }}
           css={css({
             flex: 1,
@@ -215,7 +232,7 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
           type="submit"
           css={iconButton}
           aria-label={t("search")}
-          disabled={loading || !query.trim()}
+          disabled={loading || !query.trim() || !map}
         >
           {loading ? (
             <Loader2 css={[iconSize, css({ animation: `${spin} 1s linear infinite` })]} />
@@ -227,6 +244,7 @@ export function MapSearch({ map }: { map: LeafletMap | null }) {
 
       {message && (
         <div
+          id={messageId}
           role="status"
           css={[
             panel,

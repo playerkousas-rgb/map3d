@@ -16,6 +16,7 @@
  * "Map from Lands Department" must stay visible wherever the tiles are shown.
  */
 
+import { getDataSource } from "@/config/dataSources";
 import { BBox } from "./overpass";
 
 export type GroundLayerId = "hm20c" | "imagery" | "countryside" | "plain";
@@ -63,20 +64,15 @@ export const GROUND_LAYERS: Record<Exclude<GroundLayerId, "plain">, GroundLayerI
   },
 };
 
-const LANDSD_API = "https://mapapi.geodata.gov.hk/gs/api/v1.0.0";
+
 
 /** Tile URL template for a layer (Lands Department topographic / imagery, or OpenTopoMap). */
 export function tileUrlFor(layer: GroundLayerId, z: number, x: number, y: number): string | null {
-  switch (layer) {
-    case "hm20c":
-      return `${LANDSD_API}/xyz/basemap/WGS84/${z}/${x}/${y}.png`;
-    case "imagery":
-      return `${LANDSD_API}/xyz/imagery/WGS84/${z}/${x}/${y}.png`;
-    case "countryside":
-      return `https://${["a", "b", "c"][(x + y) % 3]}.tile.opentopomap.org/${z}/${x}/${y}.png`;
-    default:
-      return null;
-  }
+  if (layer === "plain") return null;
+  const source = getDataSource({ hm20c: "hk-map", imagery: "hk-imagery", countryside: "opentopo" }[layer]);
+  if (source.kind !== "xyz") return null;
+  return source.url.replace("{s}", ["a", "b", "c"][(x + y) % 3])
+    .replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
 }
 
 /* ------------------------------------------------------------------ *

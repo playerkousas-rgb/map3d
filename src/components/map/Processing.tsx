@@ -3,11 +3,7 @@ import { CheckCircle2, Loader2, SearchX } from "lucide-react";
 import { useI18n } from "@/i18n";
 import type { CellProgress } from "@/utils/sceneData";
 
-export interface Building {
-  id: number;
-  tags: { [key: string]: string | undefined };
-  geometry?: { lat: number; lng: number }[];
-}
+export type Building = import("@/utils/sceneData").RawBuilding;
 
 const spinAnimation = keyframes`
 from { transform: rotate(0deg); }
@@ -97,6 +93,27 @@ export function FetchStatus({
       {!loading && fetched && failed > 0 && (
         <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
           {t("orthoSomeCellsFailed")}
+        </div>
+      )}
+
+      {!!cells?.flatHippedRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
+          {cells.flatHippedRoofs} {t("buildingHippedFlat")}
+        </div>
+      )}
+      {!!cells?.flatPyramidalRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
+          {cells.flatPyramidalRoofs} {t("buildingPyramidalFlat")}
+        </div>
+      )}
+      {!!cells?.flatSkillionRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
+          {cells.flatSkillionRoofs} {t("buildingSkillionFlat")}
+        </div>
+      )}
+      {!!cells?.skippedBuildings && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000", paddingLeft: "1.5rem" })}>
+          {cells.skippedBuildings} {t("buildingGeometrySkipped")}
         </div>
       )}
 

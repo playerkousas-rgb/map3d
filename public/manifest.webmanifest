@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "map3d · 3D 定向地圖",
+  "short_name": "map3d",
+  "description": "Real-world 3D maps, GPX models and city orienteering. © SCOUT SYSTEM",
+  "version": "0.1.0",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#dcecf2",
+  "background_color": "#dcecf2",
+  "icons": [
+    { "src": "/icons/v0.1.0/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/v0.1.0/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/v0.1.0/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/v0.1.0/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

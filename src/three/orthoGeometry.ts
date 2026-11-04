@@ -21,6 +21,7 @@
  */
 
 import * as THREE from "three";
+import { buildBuildingSurfaces, type BuildingTags } from "@/utils/builders/buildingBuilder";
 import type { LocalProjection } from "@/utils/projection";
 import type { LatLng } from "@/utils/course";
 
@@ -51,7 +52,9 @@ function paletteColor(id: number): THREE.Color {
 export interface BuildingInput {
   id: number;
   ring: LatLng[];
+  holes?: LatLng[][];
   heightM: number;
+  tags?: BuildingTags;
 }
 
 export interface BuildingsGeometry {
@@ -63,10 +66,10 @@ export interface BuildingsGeometry {
 type HeightLookup = (at: LatLng) => number;
 
 /**
- * Extrude every footprint into walls + flat roofs.
+ * Extrude every footprint into walls + flat or OSM gabled roofs.
  *
  * Walls are built edge by edge (two triangles per edge, hard normals) and roofs
- * from an ear-clipped triangulation of the ring. Faces are wound so their
+ * from an ear-clipped triangulation, split at the ridge for gabled tags. Faces are wound so their
  * normals point outwards, whatever the winding of the source polygon.
  */
 export function buildBuildingsGeometry(
@@ -94,77 +97,29 @@ export function buildBuildingsGeometry(
 
     // Scene coordinates (x east, z south) with the ring's terrain floor.
     const plan = ring.map((p) => projection.toScene(p.lat, p.lng));
-    const area = Math.abs(signedArea(plan));
+    const holeRings = (building.holes ?? []).map(dedupeRing);
+    const holes = holeRings.map(r => r.map(p => projection.toScene(p.lat, p.lng)));
+    const area = Math.abs(signedArea(plan)) - holes.reduce((sum, r) => sum + Math.abs(signedArea(r)), 0);
     if (area < minAreaM2) continue;
 
     let baseHeight = Infinity;
-    for (const p of ring) baseHeight = Math.min(baseHeight, groundHeight(p));
+    for (const p of [ring, ...holeRings].flat()) baseHeight = Math.min(baseHeight, groundHeight(p));
     if (!Number.isFinite(baseHeight)) baseHeight = 0;
-    const topHeight = baseHeight + Math.max(building.heightM, 2);
-
     const wall = paletteColor(building.id);
     const roof = wall.clone().multiplyScalar(0.88);
-
-    // Roof — ear clipping over the footprint, on the flat top.
-    const contour = plan.map((p) => new THREE.Vector2(p.x, -p.z));
-    const faces = THREE.ShapeUtils.triangulateShape(contour, []);
-    for (const [ia, ib, ic] of faces) {
-      const a = contour[ia];
-      const b = contour[ib];
-      const c = contour[ic];
-      pushTriangle(
-        roofPos,
-        roofNorm,
-        roofCol,
-        [a.x, topHeight, -a.y],
-        [b.x, topHeight, -b.y],
-        [c.x, topHeight, -c.y],
-        [0, 1, 0],
-        roof,
-      );
-    }
-
-    // Walls — one quad per ring edge, normal pointing away from the centroid.
-    const centroid = plan.reduce(
-      (acc, p) => ({ x: acc.x + p.x / plan.length, z: acc.z + p.z / plan.length }),
-      { x: 0, z: 0 },
-    );
-    for (let i = 0; i < plan.length; i++) {
-      const p = plan[i];
-      const q = plan[(i + 1) % plan.length];
-      const dx = q.x - p.x;
-      const dz = q.z - p.z;
-      const len = Math.hypot(dx, dz);
-      if (len < 0.05) continue;
-
-      // Candidate outward normal: perpendicular to the edge, flipped when it
-      // points at the centroid instead of away from it.
-      let nx = -dz / len;
-      let nz = dx / len;
-      const midX = (p.x + q.x) / 2;
-      const midZ = (p.z + q.z) / 2;
-      if (nx * (midX - centroid.x) + nz * (midZ - centroid.z) < 0) {
-        nx = -nx;
-        nz = -nz;
+    const surfaces = buildBuildingSurfaces(plan, baseHeight, building.heightM, building.tags, holes);
+    if (!surfaces.roofs.length) continue;
+    const append = (vertices: number[], positions: number[], normals: number[], colors: number[], color: THREE.Color) => {
+      for (let i = 0; i < vertices.length; i += 9) {
+        const a = vertices.slice(i, i + 3), b = vertices.slice(i + 3, i + 6), c = vertices.slice(i + 6, i + 9);
+        const ab = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+        const ac = new THREE.Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+        const normal = ab.cross(ac).normalize();
+        pushTriangle(positions, normals, colors, a, b, c, [normal.x, normal.y, normal.z], color);
       }
-
-      const bottomP = [p.x, baseHeight, p.z];
-      const bottomQ = [q.x, baseHeight, q.z];
-      const topQ = [q.x, topHeight, q.z];
-      const topP = [p.x, topHeight, p.z];
-      const normal = [nx, 0, nz];
-
-      // Winding chosen so the cross product of the first triangle matches the
-      // outward normal — this keeps the faces visible from outside the model.
-      const winding = outwardWinding(bottomP, bottomQ, topQ, normal);
-      if (winding) {
-        pushTriangle(wallPos, wallNorm, wallCol, bottomP, bottomQ, topQ, normal, wall);
-        pushTriangle(wallPos, wallNorm, wallCol, bottomP, topQ, topP, normal, wall);
-      } else {
-        pushTriangle(wallPos, wallNorm, wallCol, bottomQ, bottomP, topQ, normal, wall);
-        pushTriangle(wallPos, wallNorm, wallCol, topQ, bottomP, topP, normal, wall);
-      }
-    }
+    };
+    append(surfaces.walls, wallPos, wallNorm, wallCol, wall);
+    append(surfaces.roofs, roofPos, roofNorm, roofCol, roof);
 
     count++;
   }
@@ -311,20 +266,6 @@ function pushTriangle(
   positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
   for (let i = 0; i < 3; i++) normals.push(normal[0], normal[1], normal[2]);
   for (let i = 0; i < 3; i++) colors.push(color.r, color.g, color.b);
-}
-
-/** Does (a, b, c) wind so that its normal matches `normal`? */
-function outwardWinding(a: number[], b: number[], c: number[], normal: number[]): boolean {
-  const ux = b[0] - a[0];
-  const uy = b[1] - a[1];
-  const uz = b[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  const cx = uy * vz - uz * vy;
-  const cy = uz * vx - ux * vz;
-  const cz = ux * vy - uy * vx;
-  return cx * normal[0] + cy * normal[1] + cz * normal[2] >= 0;
 }
 
 /** Twice the signed area of a plan polygon (positive = counter-clockwise in x/z). */

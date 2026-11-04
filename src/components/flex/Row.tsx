@@ -17,6 +17,7 @@ export function Row({
       css={css({
         display: "flex",
         flexDirection: "row",
+        flexWrap: "wrap",
         gap: gap,
         justifyContent: justify,
         overflow: overflow,
