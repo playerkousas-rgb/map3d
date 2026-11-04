@@ -13,11 +13,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { css } from "@emotion/react";
-import { Download, Eye, FileUp, Redo2, Share2, Trash2, Undo2, Upload } from "lucide-react";
+import { Download, Eye, FileUp, Redo2, Share2, Table, Trash2, Undo2, Upload } from "lucide-react";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { TapButton } from "@/components/ui/Touch";
 import { CourseToolbar } from "./CourseToolbar";
 import { SceneSettings } from "./SceneSettings";
+import { CourseSummary } from "./CourseSummary";
 import { useCourseStore } from "@/state/courseStore";
 import { useExportStore } from "@/state/exportStore";
 import { useI18n } from "@/i18n";
@@ -58,6 +59,7 @@ export function CoursePanel() {
   const canRedo = useCourseStore((state) => state.future.length > 0);
   const area = useCourseStore((state) => state.area);
   const [shareNote, setShareNote] = useState<"copied" | "failed" | "empty" | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   useEffect(() => {
     if (!shareNote) return;
@@ -261,6 +263,10 @@ export function CoursePanel() {
               {t("orthoShare")}
             </TapButton>
           )}
+          <TapButton onClick={() => setSummaryOpen(true)}>
+            <Table css={css({ width: "16px", height: "16px" })} />
+            {t("orthoSummary")}
+          </TapButton>
           {shareNote && (
             <p
               role="status"
@@ -385,6 +391,7 @@ export function CoursePanel() {
               await importCourseFile(file);
             }}
           />
+          <CourseSummary isOpen={summaryOpen} onClose={() => setSummaryOpen(false)} course={course} />
         </div>
       )}
     </BottomSheet>
