@@ -1,8 +1,8 @@
 # GIS catalogue: sources, protocol and limits
 
-Catalogue inspected on2026-11-02; shared collection validator/footer refreshed2026-11-03. `src/config/dataSources.ts` is the single catalogue; `DataSources.tsx` renders controls and creates Leaflet layers. Existing 3D tile URLs also read this catalogue.
+Catalogue inspected 2026-11-02; collection validator/footer refreshed 2026-11-03; Esri/CARTO XYZ basemaps added 2026-11-04 (v0.1.0) to reach ten renderable browser layers. `src/config/dataSources.ts` is the single catalogue; `DataSources.tsx` renders controls and creates Leaflet layers. Existing 3D tile URLs also read this catalogue.
 
-## Ten datasets, seven providers — not ten fully integrated providers
+## Twelve datasets, nine providers — ten fully integrated renderable + two honest download references
 
 | Entry | Protocol/status | Evidence |
 |---|---|---|
@@ -14,7 +14,7 @@ Catalogue inspected on2026-11-02; shared collection validator/footer refreshed20
 | Natural Earth countries | `L.geoJSON` overlay, 1:110m | [Official downloads](https://www.naturalearthdata.com/downloads/); [`ne_110m_admin_0_countries.geojson`](https://github.com/nvkelso/natural-earth-vector/blob/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_110m_admin_0_countries.geojson) |
 | Natural Earth rivers | `L.geoJSON` overlay, 1:110m | [`ne_110m_rivers_lake_centerlines.geojson`](https://github.com/nvkelso/natural-earth-vector/blob/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_110m_rivers_lake_centerlines.geojson) |
 | Natural Earth lakes | `L.geoJSON` overlay, 1:110m | [`ne_110m_lakes.geojson`](https://github.com/nvkelso/natural-earth-vector/blob/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_110m_lakes.geojson) |
-| WorldPop population | **Download reference only** | [Hub](https://hub.worldpop.org/); supplied [directory](https://data.worldpop.org/GIS/Population/Global_2000_2020/2020/0_Mosaicked/) actually lists an approximately **829 MB TIFF** and **71 GB ZIP**, not a WMS endpoint. The app does not auto-download or render these. Individual dataset licences apply. |
+| Esri World Imagery | XYZ basemap | Global mosaic via [ArcGIS REST](https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer); [Esri terms](https://www.esri.com/en-us/legal/terms/full-master-agreement) — attribution required |\n| CARTO Light | XYZ basemap | Clean base via [CARTO basemaps](https://carto.com/basemaps/); © OSM © CARTO — [attributions](https://carto.com/attributions) |\n| WorldPop population | **Download reference only** | [Hub](https://hub.worldpop.org/); supplied [directory](https://data.worldpop.org/GIS/Population/Global_2000_2020/2020/0_Mosaicked/) actually lists an approximately **829 MB TIFF** and **71 GB ZIP**, not a WMS endpoint. The app does not auto-download or render these. Individual dataset licences apply. |
 | HydroSHEDS HydroRIVERS | **Download/preprocessing reference only** | [Official HydroRIVERS page](https://www.hydrosheds.org/products/hydrorivers) identifies the Asia Shapefile ZIP as approximately **91 MB**. A Shapefile ZIP cannot be passed directly to `L.geoJSON`. Clip/reproject/convert externally first; HydroSHEDS licence and required attribution apply. |
 
 The Natural Earth URLs are pinned to inspected revision `ca96624a56bd078437bca8184e78163e5039ad19`, rather than moving `master`. Original files were retrieved through GitHub for validation in ignored temporary storage: **177 country, 13 river and 24 lake features** passed the same geometry validator used by the app. No source dataset is committed or bundled. Natural Earth data are public domain; the user-facing attribution remains visible.
@@ -33,11 +33,11 @@ The Natural Earth URLs are pinned to inspected revision `ca96624a56bd078437bca81
 
 The automated browser suite (now368 dev +36 built-production CSP checks, broader than GIS alone) uses mocked imagery/GeoJSON to test loading, failure, retry, cleanup, attribution, WMS query construction, UI sizes and downloads. They do **not** prove live cross-origin access, service uptime, geographical coverage, imagery quality or supplier licence compliance for a specific reuse. Actual provider responses can still be blocked by CORS, offline conditions or service policy; the UI reports failure.
 
-A [bounded local GeoJSON workflow](local-data-and-sharing.md) now displays externally clipped/converted vector files. This is not native TIFF/Shapefile decoding or WorldPop population analysis. Direct provider rendering still needs a suitable documented CORS-enabled web service. The original request for ten directly rendered GIS providers is therefore **not fully complete**; the delivered catalogue is ten dataset entries, eight browser-layer configurations plus two honest download references.
+A [bounded local GeoJSON workflow](local-data-and-sharing.md) now displays externally clipped/converted vector files. This is not native TIFF/Shapefile decoding or WorldPop population analysis. Direct provider rendering still needs a suitable documented CORS-enabled web service. The original request for ten directly rendered GIS providers is now **met for browser-layer rendering**: twelve dataset entries, **ten browser-layer configurations (7 XYZ/WMS basemaps + 3 GeoJSON overlays) plus two honest bulk-download references** (WorldPop/HydroRIVERS remain non-renderable by design).
 
 ## OSM hipped interpretation refresh — 2026-11-03
 
-Both browser-direct Overpass workflows now recognize bounded rectangular `roof:shape=hipped` with explicit rise; no endpoint, provider or server proxy added. Flat fallback is counted per valid component, separate from rejected objects and other roofs. Strict projected orthogonality can yield an extra fallback in one mode; no claim of identical support for every physical rectangle. Original source tags stay unchanged. See [source, policies and mock-network/CAD evidence](hipped-roofs.md). The catalogue remains10datasets/7providers/8browser configurations+2bulk references, not10rendered providers.
+Both browser-direct Overpass workflows now recognize bounded rectangular `roof:shape=hipped` with explicit rise; no endpoint, provider or server proxy added. Flat fallback is counted per valid component, separate from rejected objects and other roofs. Strict projected orthogonality can yield an extra fallback in one mode; no claim of identical support for every physical rectangle. Original source tags stay unchanged. See [source, policies and mock-network/CAD evidence](hipped-roofs.md). Catalogue updated 2026-11-04 to **12 datasets / 9 providers — 10 rendered (7 XYZ/WMS + 3 GeoJSON) + 2 bulk references**; previous 10/7/8+2 text was honest at that time, not a silent backfill.
 
 ## Explicit hipped ridge tags — 2026-11-03
 

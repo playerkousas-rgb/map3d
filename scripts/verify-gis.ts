@@ -4,7 +4,7 @@ import { useExportStore, safeExportFilename } from "../src/state/exportStore";
 
 export async function verifyGisAndExports(ok: (condition: boolean, label: string) => void) {
   console.log("\n[8] GIS registry, bounded loading and export state");
-  ok(DATA_SOURCES.length === 10 && new Set(DATA_SOURCES.map(s => s.id)).size === 10, "10 distinct dataset entries, not 10 claimed providers");
+  ok(DATA_SOURCES.length === 12 && new Set(DATA_SOURCES.map(s => s.id)).size === 12, "12 distinct dataset entries (10 rendered + 2 honest download references)");
   ok(DATA_SOURCES.every(s => s.url.startsWith("https://") && s.docs.startsWith("https://") && !!s.attribution && !!s.noteZh), "all datasets have HTTPS, provenance, attribution and limitations");
   ok(getDataSource("worldpop").kind === "download" && getDataSource("hydrorivers").kind === "download", "TIFF/Shapefile downloads are not misrepresented as web layers");
   ok(DATA_SOURCES.filter(s => s.kind === "geojson").every(s => /[a-f0-9]{40}/.test(s.url)), "Natural Earth data URLs are pinned to inspected source revision");
