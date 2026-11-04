@@ -122,6 +122,8 @@ const dict = {
     gpxFillingElevation: "Fetching elevation…",
     gpxElevationFailed: "Couldn't fetch elevation data. Please try again later.",
     gpxElevationSource: "Elevation data:",
+    gpxProfileStart: "Start",
+    gpxProfileEnd: "End",
     // Orienteering 3D
     modeOrtho: "3D Orienteering",
     orthoTitle: "3D Orienteering Course",
@@ -343,6 +345,8 @@ const dict = {
     gpxFillingElevation: "正在取得海拔資料…",
     gpxElevationFailed: "未能取得海拔資料，請稍後再試。",
     gpxElevationSource: "海拔資料來源：",
+    gpxProfileStart: "起點",
+    gpxProfileEnd: "終點",
     // Orienteering 3D
     modeOrtho: "定向 3D",
     orthoTitle: "3D 城市定向",

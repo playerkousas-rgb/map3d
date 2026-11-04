@@ -11,6 +11,7 @@ import { isSceneSettled, useSceneStore } from "@/state/sceneStore";
 import { useCourseStore } from "@/state/courseStore";
 import { useDraftLifecycle } from "@/hooks/useDraftLifecycle";
 import { GpxSpace, GpxModelSettings } from "../three/GpxSpace";
+import { ElevationProfile } from "@/components/gpx/ElevationProfile";
 import { FullscreenModal } from "../components/FullscreenModal";
 import { Title } from "@/components/text/Title";
 import { Description } from "@/components/text/Description";
@@ -869,6 +870,8 @@ function App() {
               value={`${gpxTrack.stats.minEle} ~ ${gpxTrack.stats.maxEle} m`}
             />
           </div>
+
+          <ElevationProfile points={gpxTrack.points} hasElevation={gpxTrack.stats.hasElevation} />
 
           {gpxTrack.sourcePointCount > gpxTrack.points.length && (
             <p role="status" css={css({ color: "#8a5a00", fontSize: "12px", lineHeight: 1.5 })}>
