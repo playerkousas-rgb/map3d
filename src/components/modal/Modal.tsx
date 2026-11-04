@@ -1,145 +1,90 @@
-import React, { useEffect, useState } from "react";
-
+import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { css, keyframes } from "@emotion/react";
+import { useI18n } from "@/i18n";
 
-type ModalType = {
-  children?: any;
-  onClose?: any;
+type ModalProps = {
+  children?: ReactNode;
+  onClose: () => void;
+  label: string;
   isOpen?: boolean;
-  isScroll?: boolean;
 };
 
-const fadeInBackground = keyframes`
-0% {
-    backdrop-filter: brightness(100%)
-
-}
-  100% {
-    backdrop-filter: brightness(70%)
-  }
+const enter = keyframes`
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 `;
 
-const fadeOutBackground = keyframes`
-0% {
-    backdrop-filter: brightness(70%)
-
-}
-  100% {
-    backdrop-filter: brightness(100%)
-  }
-`;
-
-const fadeIn = keyframes`
-    0% {
-        transform: translateY(-10px);
-    opacity: 40%;
-
-    }
-    100% {
-        transform: translateY(0px);
-        opacity: 100%;
-
-    }
-`;
-
-const fadeOut = keyframes`
-    0% {
-        transform: translateY(0px);
-    opacity: 100%;
-
-    }
-    100% {
-        transform: translateY(-10px);
-        opacity: 0%;
-
-    }
-`;
-
-function Modal({ children, onClose, isOpen, isScroll = false }: ModalType) {
-  const [open, setOpen] = useState(false);
-  const [fadeOutAnimation, setFadeOutAnimation] = useState(
-    `${fadeIn} 0.3s forwards`
-  );
-  const [backgroundAnimation, setBackgroundAnimation] = useState(
-    `${fadeInBackground} 0.3s forwards`
-  );
-
-  const handleClose = (e: any) => {
-    if (e.target.id != "modal") {
-      return false;
-    }
-    setFadeOutAnimation(`${fadeOut} 0.3s forwards`);
-    setBackgroundAnimation(`${fadeOutBackground} 0.3s forwards`);
-
-    setTimeout(() => {
-      onClose();
-      setOpen(false);
-    }, 280);
-  };
-
+/** Native top-layer modality keeps the underlying map/canvas inert, traps
+ * keyboard focus and restores the opener when the controlled dialog closes.
+ * No delayed close timer can dismiss a newly reopened dialog.
+ */
+export function Modal({ children, onClose, label, isOpen = false }: ModalProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { t } = useI18n();
   useEffect(() => {
-    if (isOpen) {
-      setOpen(true);
-      setFadeOutAnimation(`${fadeIn} 0.3s forwards`);
-      setBackgroundAnimation(`${fadeInBackground} 0.3s forwards`);
-    } else {
-      setFadeOutAnimation(`${fadeOut} 0.3s forwards`);
-      setBackgroundAnimation(`${fadeOutBackground} 0.3s forwards`);
-
-      setTimeout(() => {
-        onClose();
-        setOpen(false);
-      }, 280);
-    }
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (isOpen && !dialog.open) dialog.showModal();
+    else if (!isOpen && dialog.open) dialog.close();
+    return () => { if (dialog.open) dialog.close(); };
   }, [isOpen]);
 
   return (
-    <div
-      onClick={handleClose}
-      id="modal"
+    <dialog
+      ref={dialogRef}
+      aria-label={label}
+      aria-modal="true"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        // Some native-dialog implementations tab to browser chrome after the
+        // last action. Explicitly cycle the visible, enabled controls instead.
+        const actions = [...event.currentTarget.querySelectorAll<HTMLElement>(
+          'button, a[href], input, select, textarea, [tabindex]'
+        )].filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') &&
+          element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+        const edge = event.shiftKey ? actions[0] : actions[actions.length - 1];
+        if (document.activeElement === edge) {
+          event.preventDefault();
+          (event.shiftKey ? actions[actions.length - 1] : actions[0])?.focus();
+        }
+      }}
+      onClick={(event) => {
+        // A click in the native backdrop targets the dialog itself. Padding,
+        // scrolling and clicks in its content must not dismiss it.
+        if (event.target !== event.currentTarget) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < rect.left || event.clientX > rect.right ||
+            event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+      }}
       css={css({
-        display: open ? "flex" : "none",
-        justifyContent: "center",
-        alignItems: "center",
-        width: "100%",
-        height: "100%",
-        position: "fixed",
-        top: "0",
-        left: "0",
-        backdropFilter: "brightness(70%)",
-        animation: backgroundAnimation,
-        scrollbarWidth: "none",
-        zIndex: 3000,
-        transition: "0.1s",
+        margin: "auto",
+        padding: 0,
+        width: "min(36rem, calc(100vw - 2rem))",
+        maxWidth: "none",
+        maxHeight: "calc(100dvh - 2rem)",
+        overflowY: "auto",
+        boxSizing: "border-box",
+        background: "#fff",
+        color: "#25313d",
+        border: "1px solid #d6dce2",
+        borderRadius: "12px",
+        boxShadow: "0 8px 40px rgba(0,0,0,.2)",
+        "&[open]": { animation: `${enter} .15s ease-out` },
+        "&::backdrop": { background: "rgba(0,0,0,.35)", backdropFilter: "blur(2px)" },
       })}
     >
-      <div
-        css={css({
-          width: "100%",
-          height: isScroll ? "70vh" : "auto",
-          "@media (min-width: 1000px)": {
-            width: "40vw",
-          },
-          "@media (min-width: 1400px)": {
-            width: "30vw",
-          },
-          margin: "2rem",
-          padding: "1.6rem 1.6rem",
-          backgroundColor: "#ffffff",
-          borderRadius: "0.6rem",
-          border: `0.1rem solid #dddddd`,
-          boxShadow: `rgba(147, 148, 158, 0.25) 0px 7px 40px`,
-          fontFamily: "'Noto Sans KR', sans-serif",
-          overflow: "scroll",
-          wordBreak: "break-all",
-          //translate: "translateY(-10px)",
-          animation: fadeOutAnimation,
-        })}
-      >
+      <div css={css({ padding: "1.25rem", overflowWrap: "anywhere" })}>
+        <div css={css({ display: "flex", justifyContent: "flex-end", marginBottom: "0.25rem" })}>
+          <button type="button" onClick={onClose} aria-label={t("closeDialog")}
+            css={css({ minWidth: 44, minHeight: 44, border: "1px solid #c3ccd5", borderRadius: 8,
+              background: "#f8fafc", color: "#25313d", fontSize: "24px", cursor: "pointer" })}>
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
         {children}
       </div>
-    </div>
+    </dialog>
   );
 }
-
-export { Modal };

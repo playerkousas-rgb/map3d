@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import type { ThreeEvent } from "@react-three/fiber";
-import { heightAt, HeightField } from "@/utils/terrain";
+import { buildContourGeometry, buildTerrainIndices, createHillshadeTexture, heightAt, HeightField } from "@/utils/terrain";
 import { LocalProjection } from "@/utils/projection";
 import {
   buildTileMosaic,
@@ -45,6 +45,8 @@ export interface GroundProps {
   exaggeration: number;
   layer: GroundLayerId;
   showGrid: boolean;
+  showContours: boolean;
+  showHillshade: boolean;
   onPointerDown?: (event: ThreeEvent<PointerEvent>) => void;
   onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
   onPointerUp?: (event: ThreeEvent<PointerEvent>) => void;
@@ -57,11 +59,12 @@ export function Ground({
   exaggeration,
   layer,
   showGrid,
+  showContours,
+  showHillshade,
   onPointerDown,
   onPointerMove,
   onPointerUp,
 }: GroundProps) {
-  const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null);
   const setStatus = useSceneStore((state) => state.set);
 
   const south = Math.min(area[0].lat, area[1].lat);
@@ -85,7 +88,8 @@ export function Ground({
     const count = (SEGMENTS + 1) * (SEGMENTS + 1);
     const positions = new Float32Array(count * 3);
     const uvs = new Float32Array(count * 2);
-    const indices: number[] = [];
+    const indices = buildTerrainIndices(SEGMENTS);
+    const reliefUvs = new Float32Array(count * 2);
 
     const spanLng = east - west;
     const spanLat = north - south;
@@ -102,25 +106,18 @@ export function Ground({
         positions[i * 3] = x;
         positions[i * 3 + 1] = heightAt(field, { lat, lng }) * exaggeration;
         positions[i * 3 + 2] = z;
+        reliefUvs[i * 2] = field ? (lng - field.west) / (field.east - field.west) : col / SEGMENTS;
+        reliefUvs[i * 2 + 1] = field ? (lat - field.south) / (field.north - field.south) : row / SEGMENTS;
         // Mercator-aligned UVs so the tiles land on exactly the right blocks.
         uvs[i * 2] = (lng - mosaicExtent.west) / uSpan;
         uvs[i * 2 + 1] = (mercatorY(lat) - vMin) / vSpan;
       }
     }
 
-    for (let row = 0; row < SEGMENTS; row++) {
-      for (let col = 0; col < SEGMENTS; col++) {
-        const a = row * (SEGMENTS + 1) + col;
-        const b = a + 1;
-        const c = a + SEGMENTS + 1;
-        const d = c + 1;
-        indices.push(a, c, b, b, c, d);
-      }
-    }
-
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setAttribute("uv1", new THREE.BufferAttribute(reliefUvs, 2));
     geo.setIndex(indices);
     geo.computeVertexNormals();
     return geo;
@@ -128,17 +125,22 @@ export function Ground({
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
+  // Tag asynchronous results with their exact request. Changing bounds/layer
+  // hides the old texture immediately, without a synchronous effect state reset.
+  const textureRequest = useMemo(() => ({ south, west, north, east, layer }),
+    [south, west, north, east, layer]);
+  const [loadedTexture, setLoadedTexture] = useState<{
+    request: typeof textureRequest; texture: THREE.CanvasTexture;
+  } | null>(null);
+  const texture = loadedTexture?.request === textureRequest ? loadedTexture.texture : null;
+
   // Load the official map layer; any failure falls back to the plain ground.
   useEffect(() => {
-    if (layer === "plain") {
-      setTexture(null);
-      setStatus({ groundTextured: false, groundFailed: false });
-      return;
-    }
+    setStatus({ groundTextured: false, groundFailed: false });
+    if (textureRequest.layer === "plain") return;
     let stale = false;
     let created: THREE.CanvasTexture | null = null;
-    setTexture(null);
-    buildTileMosaic({ south, west, north, east }, layer)
+    buildTileMosaic(textureRequest, textureRequest.layer)
       .then((mosaic) => {
         if (stale) return;
         if (!mosaic) {
@@ -149,18 +151,28 @@ export function Ground({
         created.colorSpace = THREE.SRGBColorSpace;
         created.anisotropy = 4;
         created.needsUpdate = true;
-        setTexture(created);
+        setLoadedTexture({ request: textureRequest, texture: created });
         setStatus({ groundTextured: true, groundFailed: false });
       })
       .catch(() => {
-        setTexture(null);
+        if (stale) return;
         setStatus({ groundTextured: false, groundFailed: true });
       });
     return () => {
       stale = true;
       created?.dispose();
     };
-  }, [south, west, north, east, layer, setStatus]);
+  }, [textureRequest, setStatus]);
+
+  const hillshade = useMemo(() => field && showHillshade && exaggeration !== 0
+    ? createHillshadeTexture(field, { zFactor: exaggeration }) : null,
+  [field, showHillshade, exaggeration]);
+  useEffect(() => () => hillshade?.dispose(), [hillshade]);
+
+  const contours = useMemo(() => field && showContours && exaggeration > 0
+    ? buildContourGeometry(field, projection, { exaggeration, segments: SEGMENTS }) : null,
+  [field, showContours, exaggeration, projection]);
+  useEffect(() => () => contours?.dispose(), [contours]);
 
   /** UTM kilometre grid traced along the terrain — where "KK 07 66" comes from. */
   const gridGeometry = useMemo(() => {
@@ -230,6 +242,18 @@ export function Ground({
           metalness={0}
         />
       </mesh>
+      {hillshade && (
+        <mesh geometry={geometry} raycast={() => {}} renderOrder={1}>
+          <meshBasicMaterial map={hillshade} blending={THREE.MultiplyBlending}
+            transparent depthWrite={false} polygonOffset polygonOffsetFactor={-1}
+            polygonOffsetUnits={-1} toneMapped={false} />
+        </mesh>
+      )}
+      {contours && (
+        <lineSegments geometry={contours} raycast={() => {}} renderOrder={2}>
+          <lineBasicMaterial color="#79543a" transparent opacity={0.7} depthWrite={false} />
+        </lineSegments>
+      )}
       {gridGeometry && (
         <lineSegments geometry={gridGeometry}>
           <lineBasicMaterial color="#1a73e8" transparent opacity={0.5} />

@@ -16,6 +16,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { useI18n } from "@/i18n";
 import { useCourseStore } from "@/state/courseStore";
 import { sameArea, useSceneStore } from "@/state/sceneStore";
 import { useViewStore } from "@/state/viewStore";
@@ -39,10 +40,14 @@ export function OrthoSpace() {
   const layer = useCourseStore((state) => state.scene.groundLayer);
   const showGrid = useCourseStore((state) => state.scene.showGrid);
 
+  const showContours = useCourseStore((state) => state.scene.showContours);
+  const showHillshade = useCourseStore((state) => state.scene.showHillshade);
+
   if (!area) return null;
 
   return (
     <Canvas
+      style={{ width: "calc(100% - var(--sheet-w, 0px))" }}
       camera={{ fov: 55, near: 1, far: 40000, position: [0, 800, 1200] }}
       dpr={[1, 2]}
       gl={{ antialias: true, powerPreference: "high-performance" }}
@@ -57,6 +62,8 @@ export function OrthoSpace() {
         showTerrain={showTerrain}
         exaggeration={showTerrain ? exaggeration : 0}
         layer={layer}
+        showContours={showContours}
+        showHillshade={showHillshade}
         showGrid={showGrid}
       />
     </Canvas>
@@ -71,9 +78,15 @@ interface SceneProps {
   exaggeration: number;
   layer: "hm20c" | "imagery" | "countryside" | "plain";
   showGrid: boolean;
+  showContours: boolean;
+  showHillshade: boolean;
 }
 
-function Scene({ area, buildingsOn, roadsOn, exaggeration, layer, showGrid }: SceneProps) {
+function Scene({ area, buildingsOn, roadsOn, exaggeration, layer, showGrid, showContours, showHillshade }: SceneProps) {
+  const renderer = useThree(state => state.gl);
+  const { t } = useI18n();
+  useEffect(() => { renderer.domElement.setAttribute("aria-label", t("orthoTitle")); }, [renderer, t]);
+
   // Buildings, roads and terrain were fetched in the "get the 3D scene" step
   // before this view opened; the scene only reads them. If the view is somehow
   // reached with data for a different area (a refresh mid-flow), load it now.
@@ -217,6 +230,8 @@ function Scene({ area, buildingsOn, roadsOn, exaggeration, layer, showGrid }: Sc
         field={field}
         exaggeration={exaggeration}
         layer={layer}
+        showContours={showContours}
+        showHillshade={showHillshade}
         showGrid={showGrid}
         onPointerDown={handleGroundDown}
         onPointerMove={handleGroundMove}
@@ -272,6 +287,7 @@ function CameraRig({
   dragging: boolean;
 }) {
   const { camera, controls } = useThree();
+  const aspect = useThree(state => state.size.width / Math.max(1, state.size.height));
   const command = useViewStore((state) => state.command);
   const setAzimuth = useViewStore((state) => state.setAzimuth);
   const lastReport = useRef(0);
@@ -284,7 +300,8 @@ function CameraRig({
         | { target: THREE.Vector3; update: () => void; minDistance: number; maxDistance: number }
         | null;
       const elevation = mode === "top" ? 88 : mode === "tilt" ? 18 : 42;
-      const distance = mode === "top" ? extent * 0.95 : extent * 1.15;
+      // A narrow landscape canvas beside a sidebar must frame horizontally too.
+      const distance = (mode === "top" ? extent * 0.95 : extent * 1.15) / Math.min(1, aspect);
       const rad = (elevation * Math.PI) / 180;
       const horizontal = Math.cos(rad) * distance;
       camera.position.set(0, Math.sin(rad) * distance, horizontal);
@@ -295,20 +312,13 @@ function CameraRig({
       }
       camera.lookAt(0, 0, 0);
     },
-    [camera, controls, extent],
+    [camera, controls, extent, aspect],
   );
 
   // Frame the scene once, and again whenever the area changes.
   useEffect(() => {
     placeCamera("reset");
   }, [placeCamera]);
-
-  useEffect(() => {
-    const orbit = controls as unknown as { minDistance: number; maxDistance: number } | null;
-    if (!orbit) return;
-    orbit.minDistance = extent * 0.05;
-    orbit.maxDistance = extent * 6;
-  }, [controls, extent]);
 
   useEffect(() => {
     if (!command) return;
@@ -354,6 +364,8 @@ function CameraRig({
   return (
     <OrbitControls
       makeDefault
+      minDistance={extent * 0.05}
+      maxDistance={extent * 6}
       enabled={!dragging}
       enableDamping
       dampingFactor={0.12}

@@ -5,7 +5,7 @@ import { collectExportGroup, exportObject } from "@/utils/exporters";
 
 /**
  * Lives inside a <Canvas>. Watches the export store and exports
- * every object marked userData.exportable when triggered.
+ * enabled object hierarchies marked userData.exportable when triggered.
  */
 export function ExportListener() {
   const { scene } = useThree();
@@ -14,16 +14,21 @@ export function ExportListener() {
   const filename = useExportStore((s) => s.filename);
   // Start from the current request id: when a scene (re)mounts it must not
   // replay an export that was requested for the previous scene.
-  const handled = useRef(useExportStore.getState().requestId);
+  const handled = useRef(useExportStore.getState().status === "queued" ? 0 : useExportStore.getState().requestId);
 
   useEffect(() => {
     if (requestId === 0 || requestId === handled.current) return;
     handled.current = requestId;
 
-    const group = collectExportGroup(scene);
-    exportObject(group, format, filename).catch((err) =>
-      console.error("Export failed:", err)
-    );
+    const store = useExportStore.getState();
+    if (!store.start(requestId)) return;
+    // Include synchronous collection errors as well as asynchronous encoders.
+    Promise.resolve().then(() => exportObject(collectExportGroup(scene), format, filename))
+      .then(() => store.finish(requestId, true))
+      .catch((err) => {
+        console.error("Export failed:", err);
+        store.finish(requestId, false);
+      });
   }, [requestId, format, filename, scene]);
 
   return null;

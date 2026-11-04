@@ -159,6 +159,27 @@ export function OrthoProcessing() {
         </div>
       ))}
 
+      {status.terrain === "error" && <p css={css({ fontSize: "12.5px", color: "#b06000", margin: 0 })}>{t("orthoTerrainUnavailableHint")}</p>}
+      {!!status.buildingCells.flatHippedRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000" })}>
+          {status.buildingCells.flatHippedRoofs} {t("buildingHippedFlat")}
+        </div>
+      )}
+      {!!status.buildingCells.flatPyramidalRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000" })}>
+          {status.buildingCells.flatPyramidalRoofs} {t("buildingPyramidalFlat")}
+        </div>
+      )}
+      {!!status.buildingCells.flatSkillionRoofs && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000" })}>
+          {status.buildingCells.flatSkillionRoofs} {t("buildingSkillionFlat")}
+        </div>
+      )}
+      {!!status.buildingCells.skippedBuildings && (
+        <div css={css({ fontSize: "12.5px", color: "#b06000" })}>
+          {status.buildingCells.skippedBuildings} {t("buildingGeometrySkipped")}
+        </div>
+      )}
       <div css={css({ fontSize: "12.5px", color: "#80868b", paddingTop: "0.25rem" })}>
         {status.buildings === "loading" || status.roads === "loading" || status.terrain === "loading"
           ? t("fetchSeconds")

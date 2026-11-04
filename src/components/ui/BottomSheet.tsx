@@ -10,16 +10,18 @@
  */
 
 import { css } from "@emotion/react";
-import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { useIsMobile, useViewportHeight } from "@/hooks/useIsMobile";
+import { ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "@/i18n";
+import { useIsMobile, useMediaQuery, useViewportMetrics } from "@/hooks/useIsMobile";
+import { sheetStops, type SheetSnap } from "@/utils/panelLayout";
 
-export type SheetSnap = "peek" | "half" | "full";
+export type { SheetSnap } from "@/utils/panelLayout";
 
 interface BottomSheetProps {
   children: ReactNode;
-  /** always-visible part of the sheet (title row, tool rail, key stats) */
+  /** Fixed header on tall screens; part of the scroll body on short screens. */
   header: ReactNode;
-  /** height of the peek stop in pixels, excluding the safe-area padding */
+  /** Visible peek target in pixels, capped to the available viewport. */
   peekHeight?: number;
   /** width of the side panel on wide screens */
   desktopWidth?: number;
@@ -31,8 +33,6 @@ interface BottomSheetProps {
 }
 
 const TRANSITION = "transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1)";
-const HALF_RATIO = 0.46;
-const FULL_RATIO = 0.86;
 
 export function BottomSheet({
   children,
@@ -44,29 +44,29 @@ export function BottomSheet({
   onSnapChange,
   ariaLabel,
 }: BottomSheetProps) {
-  const isMobile = useIsMobile(900);
-  const viewportHeight = useViewportHeight();
+  const { t } = useI18n();
+  const dragged = useRef(false);
+  const narrow = useIsMobile(900);
+  const landscape = useMediaQuery("(min-width: 500px) and (max-height: 500px) and (orientation: landscape)");
+  const isMobile = narrow && !landscape;
+  const viewport = useViewportMetrics();
   const [snap, setSnap] = useState<SheetSnap>(controlledSnap ?? defaultSnap);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [previousCommand, setPreviousCommand] = useState(controlledSnap);
+  // A changed prop commands a stop; gestures remain local between commands.
+  // Adjust before commit rather than rendering once with stale state in an effect.
+  if (previousCommand !== controlledSnap) {
+    setPreviousCommand(controlledSnap);
+    if (controlledSnap) setSnap(controlledSnap);
+  }
+  const containerRef = useRef<HTMLElement>(null);
   const drag = useRef<{ startY: number; startOffset: number; offset: number } | null>(null);
 
-  useEffect(() => {
-    if (controlledSnap) setSnap(controlledSnap);
-  }, [controlledSnap]);
-
-  const fullHeight = Math.round(viewportHeight * FULL_RATIO);
-  const heights: Record<SheetSnap, number> = {
-    peek: peekHeight,
-    half: Math.round(viewportHeight * HALF_RATIO),
-    full: fullHeight,
-  };
+  const heights = useMemo(() => sheetStops(viewport.height, viewport.navHeight, peekHeight),
+    [viewport.height, viewport.navHeight, peekHeight]);
+  const fullHeight = heights.full;
+  const compactHeader = fullHeight < 360;
   const maxOffset = fullHeight - heights.peek;
-  const offsetFor = useCallback(
-    (state: SheetSnap) => Math.max(0, Math.min(fullHeight - heights[state], maxOffset)),
-    // heights are derived from the viewport, so this must follow it
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fullHeight, maxOffset, viewportHeight, peekHeight],
-  );
+  const offsetFor = useCallback((state: SheetSnap) => fullHeight - heights[state], [fullHeight, heights]);
 
   const applyOffset = (offset: number) => {
     const node = containerRef.current;
@@ -77,23 +77,18 @@ export function BottomSheet({
 
   /**
    * Announce the space the sheet occupies so floating controls (the camera
-   * rail, hints) can sit clear of it instead of guessing a fixed offset.
+   * palette, hints) can sit clear of it instead of guessing a fixed offset.
    */
-  const publishHeight = useCallback(
-    (state: SheetSnap) => {
-      if (typeof document === "undefined") return;
-      const root = document.documentElement.style;
-      if (isMobile) {
-        root.setProperty("--sheet-h", `${heights[state]}px`);
-        root.setProperty("--sheet-w", "0px");
-      } else {
-        root.setProperty("--sheet-h", "0px");
-        root.setProperty("--sheet-w", `${desktopWidth}px`);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [viewportHeight, peekHeight, isMobile, desktopWidth],
-  );
+  const publishHeight = useCallback((state: SheetSnap) => {
+    const root = document.documentElement.style;
+    root.setProperty("--sheet-h", isMobile ? `${heights[state]}px` : "0px");
+    root.setProperty("--sheet-w", isMobile ? "0px" : `${desktopWidth}px`);
+    root.setProperty("--viewport-top", `${viewport.top}px`);
+    root.setProperty("--viewport-bottom", `${viewport.bottom}px`);
+    root.setProperty("--viewport-h", `${viewport.height}px`);
+    root.setProperty("--scene-bottom", isMobile ? `${viewport.bottom + heights[state]}px`
+      : `calc(${viewport.bottom}px + var(--safe-bottom))`);
+  }, [isMobile, heights, desktopWidth, viewport]);
 
   const commit = useCallback(
     (next: SheetSnap) => {
@@ -109,19 +104,25 @@ export function BottomSheet({
     [offsetFor, onSnapChange, publishHeight],
   );
 
-  // Keep the sheet glued to the right stop when the viewport changes (rotation,
-  // keyboard, browser chrome).
-  useEffect(() => {
+  // Publish desktop dimensions too: the previous effect returned early because
+  // only the phone branch had a ref. Layout effects avoid a stale-overlap paint.
+  useLayoutEffect(() => {
     const node = containerRef.current;
-    if (!node) return;
-    node.style.transition = TRANSITION;
-    node.style.transform = `translateY(${offsetFor(snap)}px)`;
+    if (node && isMobile) {
+      node.style.transition = TRANSITION;
+      node.style.transform = `translateY(${offsetFor(snap)}px)`;
+    }
     publishHeight(snap);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportHeight, offsetFor]);
+    return () => {
+      for (const property of ["--sheet-h", "--sheet-w", "--viewport-top", "--viewport-bottom", "--viewport-h", "--scene-bottom"]) {
+        document.documentElement.style.removeProperty(property);
+      }
+    };
+  }, [snap, isMobile, offsetFor, publishHeight]);
 
   const onPointerDown = (event: React.PointerEvent) => {
-    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+    dragged.current = false;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = {
       startY: event.clientY,
       startOffset: offsetFor(snap),
@@ -133,6 +134,7 @@ export function BottomSheet({
     const state = drag.current;
     if (!state) return;
     const delta = event.clientY - state.startY;
+    if (Math.abs(delta) > 4) dragged.current = true;
     state.offset = Math.max(0, Math.min(state.startOffset + delta, maxOffset));
     applyOffset(state.offset);
   };
@@ -159,12 +161,16 @@ export function BottomSheet({
   if (!isMobile) {
     return (
       <aside
+        ref={containerRef}
+        data-course-panel="sidebar"
         aria-label={ariaLabel}
         css={css({
           position: "fixed",
-          top: "var(--topnav-h)",
-          right: 0,
-          bottom: 0,
+          boxSizing: "border-box",
+          top: "calc(var(--topnav-h) + var(--viewport-top, 0px))",
+          right: "var(--safe-right)",
+          bottom: "var(--viewport-bottom, 0px)",
+          paddingBottom: "var(--safe-bottom)",
           width: `${desktopWidth}px`,
           zIndex: 1200,
           display: "flex",
@@ -175,10 +181,11 @@ export function BottomSheet({
           boxShadow: "-2px 0 18px rgba(0,0,0,0.06)",
         })}
       >
-        <div css={css({ padding: "0.9rem 1rem", display: "flex", flexDirection: "column", gap: "0.6rem" })}>
+        {!compactHeader && <div css={css({ padding: "0.9rem 1rem", display: "flex", flexDirection: "column", gap: "0.6rem" })}>
           {header}
-        </div>
-        <div css={css({ padding: "0 1rem 1rem", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" })}>
+        </div>}
+        <div data-course-scroll="" css={css({ padding: "0 1rem 1rem", flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", display: "flex", flexDirection: "column" })}>
+          {compactHeader && <div css={css({ padding: "0.9rem 0" })}>{header}</div>}
           {children}
         </div>
       </aside>
@@ -188,12 +195,14 @@ export function BottomSheet({
   return (
     <section
       ref={containerRef}
+      data-course-panel="sheet"
       aria-label={ariaLabel}
       css={css({
         position: "fixed",
         left: 0,
         right: 0,
-        bottom: 0,
+        bottom: "var(--viewport-bottom, 0px)",
+        boxSizing: "border-box",
         height: `${fullHeight}px`,
         zIndex: 1200,
         display: "flex",
@@ -207,55 +216,57 @@ export function BottomSheet({
         paddingBottom: "var(--safe-bottom)",
         paddingLeft: "var(--safe-left)",
         paddingRight: "var(--safe-right)",
-        touchAction: "none",
+        overflow: "hidden",
         // start off-screen; the effect below moves it to the right stop
         transform: `translateY(${fullHeight}px)`,
         transition: TRANSITION,
         willChange: "transform",
       })}
     >
-      <div
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        role="button"
-        tabIndex={0}
-        aria-label={ariaLabel ?? "Panel"}
-        css={css({
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "10px",
-          padding: "8px 14px 10px",
-          cursor: "grab",
-          touchAction: "none",
-          flexShrink: 0,
-        })}
-      >
-        <span
-          aria-hidden
-          css={css({
-            width: "44px",
-            height: "5px",
-            borderRadius: "999px",
-            backgroundColor: "#c8ccd2",
-          })}
-        />
-        <div css={css({ width: "100%" })}>{header}</div>
+      <div css={css({ padding: "0 14px", flexShrink: 0 })}>
+        <button
+          type="button"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          aria-label={t("panelResize")}
+          aria-expanded={snap !== "peek"}
+          onClick={() => {
+            if (dragged.current) { dragged.current = false; return; }
+            commit(snap === "peek" ? "half" : snap === "half" ? "full" : "peek");
+          }}
+          onKeyDown={event => {
+            if (event.key === "ArrowUp") commit(snap === "peek" ? "half" : "full");
+            else if (event.key === "ArrowDown") commit(snap === "full" ? "half" : "peek");
+            else if (event.key === "Home") commit("peek");
+            else if (event.key === "End") commit("full");
+            else return;
+            event.preventDefault();
+          }}
+          css={css({ display: "flex", justifyContent: "center", alignItems: "center", width: "100%",
+            minHeight: 44, border: 0, background: "transparent", borderRadius: 10,
+            cursor: "grab", touchAction: "none" })}
+        >
+          <span aria-hidden="true" css={css({ width: 44, height: 5, borderRadius: 999, backgroundColor: "#c8ccd2" })} />
+        </button>
       </div>
+      {!compactHeader && <div css={css({ padding: "0 14px 10px", flexShrink: 0 })}>{header}</div>}
 
-      <div
+      <div data-course-scroll=""
         css={css({
           flex: 1,
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
           padding: "0 14px 12px",
-          // content scrolls with the finger again, the sheet keeps the handle
-          touchAction: "auto",
+          // The body scrolls independently; only the handle drags the sheet.
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          touchAction: "pan-y",
         })}
       >
+        {compactHeader && <div css={css({ paddingBottom: 10 })}>{header}</div>}
         {children}
       </div>
     </section>

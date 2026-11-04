@@ -1,5 +1,6 @@
 import { css } from "@emotion/react";
 import { DetailedHTMLProps, ButtonHTMLAttributes } from "react";
+import { APP_VERSION, APP_COPYRIGHT } from "@/config/app";
 import { useI18n } from "@/i18n";
 
 const TOP_PANEL_HEIGHT = "var(--topnav-h)";
@@ -18,13 +19,15 @@ export function TopNav() {
 
   return (
     <div
+      data-topnav=""
       css={css({
         display: "flex",
         transition: ".5s",
         transform: "translate(0px, 0px)",
         position: "fixed",
-        top: 0,
+        top: "var(--viewport-top, 0px)",
         left: 0,
+        boxSizing: "border-box",
         width: "100%",
         height: TOP_PANEL_HEIGHT,
         paddingTop: "var(--safe-top)",
@@ -65,7 +68,7 @@ export function TopNav() {
             letterSpacing: "0.02em",
           })}
         >
-          © Scout System
+          {APP_COPYRIGHT} · v{APP_VERSION}
         </span>
       </div>
 

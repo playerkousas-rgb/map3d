@@ -40,3 +40,8 @@ uploads/
 # Tool caches
 .eslintcache
 coverage
+
+# Secrets stay outside the repository; only a redacted example may be tracked.
+.env
+.env.*
+!.env.example

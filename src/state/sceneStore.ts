@@ -149,6 +149,9 @@ export const useSceneStore = create<SceneStatus>((set, get) => {
           set({ roads: "error" });
         });
     } else {
+      // A new terrain attempt must not leave an old grid/source labelled as
+      // current when its replacement fails. Null means unmeasured flat ground.
+      set({ field: null, terrainMin: 0, terrainMax: 0, terrainSource: "" });
       fetchHeightField(area)
         .then((result) => {
           if (!fresh()) return;

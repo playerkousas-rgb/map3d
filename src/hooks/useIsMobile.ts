@@ -1,9 +1,9 @@
 /**
  * Viewport helpers for the mobile layout.
  *
- * `useIsMobile` reacts to the media query *and* to the on-screen keyboard /
- * URL-bar height changes, so panels that are sized from the viewport keep
- * working when the browser chrome moves (which it does constantly on iOS).
+ * Media queries select the panel form. Separate visual-viewport metrics track
+ * resize/pan and measured navigation bounds; physical keyboard behaviour still
+ * needs device testing.
  */
 
 import { useEffect, useState } from "react";
@@ -17,7 +17,10 @@ function matches(query: string): boolean {
 }
 
 export function useIsMobile(breakpoint = MOBILE_BREAKPOINT): boolean {
-  const query = `(max-width: ${breakpoint}px)`;
+  return useMediaQuery(`(max-width: ${breakpoint}px)`);
+}
+
+export function useMediaQuery(query: string): boolean {
   const [isMobile, setIsMobile] = useState(() => matches(query));
 
   useEffect(() => {
@@ -50,31 +53,42 @@ export function useCoarsePointer(): boolean {
   return coarse;
 }
 
-/**
- * Visible viewport height in pixels — `window.innerHeight` on desktop, the
- * visual viewport (which shrinks with the keyboard) on mobile.
+/** Visible bounds also account for keyboard pan/resize, not only CSS height.
+ * Layout-viewport emulation in tests is not physical keyboard certification.
  */
-export function useViewportHeight(): number {
-  const [height, setHeight] = useState(() =>
-    typeof window === "undefined" ? 800 : window.innerHeight,
-  );
+function readViewport() {
+  if (typeof window === "undefined") return { height: 800, top: 0, bottom: 0, navHeight: 52 };
+  const vv = window.visualViewport;
+  const top = Math.max(0, Math.round(vv?.offsetTop ?? 0));
+  const height = Math.max(0, Math.round(vv?.height ?? window.innerHeight));
+  const nav = document.querySelector("[data-topnav]");
+  return { height, top, bottom: Math.max(0, window.innerHeight - top - height),
+    navHeight: nav?.getBoundingClientRect().height ?? (matches("(max-width: 720px)") ? 52 : 48) };
+}
 
+export function useViewportMetrics() {
+  const [viewport, setViewport] = useState(readViewport);
   useEffect(() => {
-    if (typeof window === "undefined") return;
     const read = () => {
-      const vv = window.visualViewport;
-      setHeight(Math.round(vv ? vv.height : window.innerHeight));
+      const next = readViewport();
+      setViewport(previous => Object.keys(next).every(key =>
+        next[key as keyof typeof next] === previous[key as keyof typeof previous]) ? previous : next);
     };
+    const observer = new ResizeObserver(read);
+    const nav = document.querySelector("[data-topnav]");
+    if (nav) observer.observe(nav);
     read();
     window.addEventListener("resize", read);
     window.addEventListener("orientationchange", read);
     window.visualViewport?.addEventListener("resize", read);
+    window.visualViewport?.addEventListener("scroll", read);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", read);
       window.removeEventListener("orientationchange", read);
       window.visualViewport?.removeEventListener("resize", read);
+      window.visualViewport?.removeEventListener("scroll", read);
     };
   }, []);
-
-  return height;
+  return viewport;
 }

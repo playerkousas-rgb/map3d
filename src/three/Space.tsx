@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { ModelCameraRig } from "./ModelCameraRig";
+import type { ViewCommand } from "@/state/viewStore";
 import { Canvas } from "@react-three/fiber";
 import { useAreaStore } from "@/state/areaStore";
 import { Html, Sky, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { ExportListener } from "./ExportListener";
-import { SafeEnvironment } from "./SafeEnvironment";
 import { normalizeBBox, overpassQuery } from "@/utils/overpass";
+import { mapBuildingShape, mapBuildingGeometry } from "./mapBuildingGeometry";
 import { useI18n } from "@/i18n";
 
 const scale = 51000;
@@ -98,6 +100,9 @@ function Building({
 
   const { wall, roof } = useMemo(() => buildingColors(id, tags), [id, tags]);
   const active = hovered || clicked;
+  const geometry = useMemo(() => mapBuildingGeometry(shape, scale, extrudeSettings.depth, tags),
+    [shape, extrudeSettings.depth, tags]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const tagLabels: { [key: string]: string } = {
     building: t("tagType"),
@@ -125,11 +130,10 @@ function Building({
         setClicked(!clicked);
         e.stopPropagation();
       }}
-      rotation={[-Math.PI / 2, 0, 0]}
-      userData={{ exportable: true }}
+      geometry={geometry}
+      userData={{ exportable: true, dxfHorizontalScale: 111320 / scale }}
     >
-      <extrudeGeometry args={[shape, extrudeSettings]} />
-      {/* group 0 = lid faces (roof), group 1 = extruded side faces (walls) */}
+      {/* group 0 = roof, group 1 = walls, including the triangular gable ends */}
       <meshStandardMaterial
         attach="material-0"
         color={active ? HOVER_COLOR : roof}
@@ -143,7 +147,7 @@ function Building({
         metalness={0.05}
       />
       {(hovered || clicked) && hoverPos && (
-        <Html position={[hoverPos.x, hoverPos.y + extrudeSettings.depth + 0.5, hoverPos.z]} center>
+        <Html position={[hoverPos.x, hoverPos.y + (geometry.boundingBox?.max.y ?? extrudeSettings.depth) + 0.5, hoverPos.z]} center>
           <div
             role="dialog"
             aria-label={tags.name || t("buildingInfo")}
@@ -488,7 +492,7 @@ function Roads({ area }: { area: any }) {
   if (!geometry) return null;
 
   return (
-    <mesh geometry={geometry} userData={{ exportable: true }}>
+    <mesh geometry={geometry} userData={{ exportable: true, dxfHorizontalScale: 111320 / scale }}>
       <meshStandardMaterial color="#4a5568" roughness={0.9} metalness={0.1} />
     </mesh>
   );
@@ -539,7 +543,7 @@ function SelectionFrame({ area }: { area: any }) {
   if (!geometry) return null;
 
   return (
-    <mesh geometry={geometry} userData={{ exportable: true }}>
+    <mesh geometry={geometry} userData={{ exportable: true, dxfHorizontalScale: 111320 / scale }}>
       <meshStandardMaterial
         color="#007bff"
         emissive="#0052cc"
@@ -576,21 +580,20 @@ function BasePlate({ area }: { area: any }) {
   if (!geometry) return null;
 
   return (
-    <mesh geometry={geometry} userData={{ exportable: true }} receiveShadow>
+    <mesh geometry={geometry} userData={{ exportable: true, dxfHorizontalScale: 111320 / scale }} receiveShadow>
       <meshStandardMaterial color="#e6e8eb" roughness={0.9} metalness={0.05} />
     </mesh>
   );
 }
 
-export function Space() {
+export function Space({ command = null }: { command?: ViewCommand | null }) {
   const areas = useAreaStore((state) => state.areas);
   const areasLoaded = useAreaStore((state) => state.areasLoaded);
-  const [realCenter, setRealCenter] = useState<any>();
   // Roads are only requested for an area whose buildings were fetched.
   // (Previously the default area was queried on every page load — with an
   // inverted bbox that made Overpass return 100k+ roads.)
-  const [roadsArea, setRoadsArea] = useState<any>();
   const center = useAreaStore((state) => state.center);
+  const roadsArea = areasLoaded ? center : undefined;
   const refLat = (center[1].lat + center[0].lat) / 2;
   const refLng = (center[1].lng + center[0].lng) / 2;
 
@@ -603,34 +606,24 @@ export function Space() {
   const areaData = () => {
     const result: Array<{
       id: number;
+      key?: string;
       shape: THREE.Shape;
       extrudeSettings: any;
       tags: any;
     }> = [];
     areas.forEach((bld: any) => {
       if (!bld.geometry || bld.geometry.length < 3) return;
-      const shapePoints = bld.geometry.map((pt: any) => project(pt.lat, pt.lng));
-      if (!shapePoints[0].equals(shapePoints[shapePoints.length - 1]))
-        shapePoints.push(shapePoints[0]);
-      const shape = new THREE.Shape(shapePoints);
-      let heightValue = parseFloat(bld.tags.height || "");
-      const heightLevels = parseFloat(bld.tags["building:levels"] || "");
-      if (isNaN(heightValue)) heightValue = 10;
-      if (!isNaN(heightLevels)) heightValue = heightLevels * 2.2;
+      const shape = mapBuildingShape(bld, project);
+      const heightValue = 10; // dimensions are resolved once by the shared builder
       const extrudeSettings = {
         steps: 1,
         depth: heightValue,
         bevelEnabled: false,
       };
-      result.push({ id: bld.id ?? result.length, shape, extrudeSettings, tags: bld.tags });
+      result.push({ id: bld.id ?? result.length, key: bld.key, shape, extrudeSettings, tags: bld.tags });
     });
     return result;
   };
-
-  useEffect(() => {
-    setRealCenter(center);
-    if (areasLoaded) setRoadsArea(center);
-  }, [areas]);
 
   const buildingsData = areaData();
 
@@ -640,7 +633,7 @@ export function Space() {
       <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} decay={0} intensity={Math.PI} />
       {buildingsData.map((item, index) => (
         <Building
-          key={index}
+          key={item.key ?? index}
           id={item.id}
           shape={item.shape}
           extrudeSettings={item.extrudeSettings}
@@ -648,14 +641,14 @@ export function Space() {
         />
       ))}
 
-      <BasePlate area={realCenter} />
-      <SelectionFrame area={realCenter} />
+      <BasePlate area={center} />
+      <SelectionFrame area={center} />
       <Roads area={roadsArea} />
       <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
-      <OrbitControls />
+      <OrbitControls makeDefault />
+      <ModelCameraRig command={command} revision={areas} />
       <ExportListener />
       <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
-      <SafeEnvironment preset="city" />
     </Canvas>
   );
 }

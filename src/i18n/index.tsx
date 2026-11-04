@@ -2,7 +2,7 @@ import {
   createContext,
   useContext,
   useState,
-  useCallback,
+  useCallback, useEffect,
   ReactNode,
 } from "react";
 
@@ -12,12 +12,18 @@ const dict = {
   en: {
     appName: "🗺️ Map3d",
     options: "Options",
-    langToggle: "中文",
+    langToggle: "中文 / ZH",
+
+    modelView: "Model view",
+    modelFit: "Fit model",
+    modelTop: "Top view",
+    modelZoomIn: "Zoom in",
+    modelZoomOut: "Zoom out",
 
     // Front
     frontTitle: "Generate 3D Map",
     frontDesc:
-      "Select an area on the map to build real-world 3D buildings and roads, or import a GPX track to create a 3D-printable model. Export as GLB / glTF / OBJ / STL.",
+      "Select an area on the map to build real-world 3D buildings and roads, or import a GPX track to create a 3D-printable model. Export as GLB / glTF / OBJ / STL / DXF.",
     modeMap: "Map → 3D Buildings",
     modeGpx: "GPX → 3D Print Model",
     importGpx: "Import GPX File",
@@ -70,8 +76,11 @@ const dict = {
     searchFailed: "Search is temporarily unavailable. Please try again later.",
 
     // Export
+    mapDataNotice: "Third-party map and elevation data are indicative only. Verify official maps and ground conditions before navigation or events.",
+    panelResize: "Resize course panel",
+    closeDialog: "Close dialog",
     exportTitle: "Export 3D Model",
-    exportDesc: "Choose a format. STL is best for 3D printing.",
+    exportDesc: "Choose a format. Exports enabled model meshes, not the whole screen. DXF omits map imagery, labels and GIS overlays. STL is best for 3D printing.",
     download: "Download",
 
     // Building info
@@ -93,14 +102,21 @@ const dict = {
     gpxElevGain: "Elevation Gain",
     gpxElevRange: "Elevation Range",
     gpxSettings: "Model Settings",
+    gpxHideSettings: "Hide settings",
+    gpxShowSettings: "Show settings",
     gpxExaggeration: "Elevation Exaggeration",
     gpxTrackWidth: "Track Width",
     gpxBaseHeight: "Base Height",
     gpxBack: "Back",
     gpxExportStl: "Export STL (3D Print)",
-    gpxParseError: "Failed to parse GPX file. Please check the file format.",
+    gpxParseError: "Invalid GPX/XML or point values. Use finite WGS84 decimal coordinates and elevations between -12,000 and 10,000 m.",
     gpxNoPoints: "No track points found in this GPX file.",
-    gpxTooLarge: "This file is too large (max 50 MB).",
+    gpxTooLarge: "Choose a non-empty UTF-8 GPX file, at most 10 MB.",
+    gpxPointLimit: "This GPX exceeds 50,000 source points. Split or simplify it first.",
+    gpxDisconnected: "Use one continuous track segment or one route. Split multiple tracks, segments or routes first; gaps are not joined automatically.",
+    gpxNoExtent: "The track has no usable horizontal extent or crosses the antimeridian. Prepare a local continuous track first.",
+    gpxPartialElevation: "Some points have no elevation. The entire model is shown flat, not with invented drops to sea level. Terrain lookup replaces all model elevations.",
+    gpxSimplified: "Model points simplified (endpoints retained); displayed distance/gain are approximations:",
     gpxNoElevation: "This track has no elevation data, so the model will be flat.",
     gpxFillElevation: "Fill in elevation from terrain data",
     gpxFillingElevation: "Fetching elevation…",
@@ -121,8 +137,16 @@ const dict = {
     orthoProcessingDesc:
       "The buildings, roads and terrain of the area are being loaded. Once they are in, press Next Step to open the 3D city and place the controls.",
     orthoRetry: "Retry",
+    orthoDataStatus: "Scene data",
+    orthoNotLoaded: "not loaded",
+    orthoCellsUnavailable: "area cells unavailable",
     orthoNoBuildingsHere: "none in this area",
+    orthoTerrainUnavailableHint: "Terrain elevations unavailable or incomplete. The reference ground is flat, not a successful 0 m DEM. Retry, or continue without terrain.",
     orthoCellsPartial: "part of the area",
+    buildingHippedFlat: "hipped building components shown flat: requires four rectangular corners without holes, aligned directions and valid roof:height, roof:levels or roof:angle (0–<90°).",
+    buildingPyramidalFlat: "pyramidal building components shown flat: requires a convex outer without holes and explicit roof:height or roof:levels; roof:angle alone is unsupported.",
+    buildingSkillionFlat: "skillion building components shown flat: missing or invalid downhill roof:direction.",
+    buildingGeometrySkipped: "OSM building objects skipped: incomplete/unsupported footprint or vertical interval; no filled-outline fallback.",
     orthoSomeCellsFailed: "Part of the area could not be loaded — the rest is fine to use.",
     orthoDrawnPartial: "showing part of them",
     orthoReadyFor3d: "Ready — press “Next Step” to open the 3D scene and place the controls.",
@@ -185,10 +209,14 @@ const dict = {
     orthoShowBuildings: "Buildings",
     orthoShowRoads: "Roads",
     orthoShowTerrain: "Terrain",
+    orthoTerrainFlatHint: "Turning Terrain off flattens the ground; it does not remove it from the view or model export.",
     orthoShowGrid: "1 km grid",
+    orthoShowContours: "Contours · 10 m",
+    orthoShowHillshade: "Hillshade",
     orthoShowRoute: "Course line",
     orthoExaggeration: "Terrain height",
     orthoNorth: "N",
+    orthoCamera: "Camera controls",
     orthoRecenter: "Fit view",
     orthoTopView: "Top view",
     orthoTiltView: "Tilt view",
@@ -210,6 +238,11 @@ const dict = {
     orthoPlayMode: "Event type",
   },
   zh: {
+    modelView: "模型視角",
+    modelFit: "完整模型",
+    modelTop: "俯視",
+    modelZoomIn: "放大",
+    modelZoomOut: "縮小",
     appName: "🗺️ Map3d",
     options: "選項",
     langToggle: "EN",
@@ -217,7 +250,7 @@ const dict = {
     // Front
     frontTitle: "生成 3D 地圖",
     frontDesc:
-      "在地圖上框選區域，生成真實世界的 3D 建築與道路；或匯入 GPX 軌跡製作可 3D 列印的模型。支援匯出 GLB / glTF / OBJ / STL。",
+      "在地圖上框選區域，生成真實世界的 3D 建築與道路；或匯入 GPX 軌跡製作可 3D 列印的模型。支援匯出 GLB / glTF / OBJ / STL / DXF。",
     modeMap: "地圖 → 3D 建築",
     modeGpx: "GPX → 3D 列印模型",
     importGpx: "匯入 GPX 檔案",
@@ -250,7 +283,7 @@ const dict = {
     prevStep: "上一步",
     editArea: "修改圈選範圍",
     sceneHint: "拖曳旋轉 · 滾輪縮放 · 點擊建築物查看資訊",
-    sceneHintGpx: "拖曳旋轉 · 滾輪縮放 · 右上面板可調整模型",
+    sceneHintGpx: "拖曳旋轉 · 滾輪縮放 · 使用設定面板調整模型",
     export: "匯出",
     tooBigTitle: "選取範圍很大",
     tooBigDesc: "會分批載入，所以需要一點時間。資料不會漏掉 — 要繼續嗎？",
@@ -264,8 +297,11 @@ const dict = {
     searchFailed: "搜尋服務暫時無法使用，請稍後再試。",
 
     // Export
+    mapDataNotice: "第三方地圖及高程僅供參考。導航或舉辦活動前，請核對官方地圖及實地情況。",
+    panelResize: "調整課程面板",
+    closeDialog: "關閉對話框",
     exportTitle: "匯出 3D 模型",
-    exportDesc: "選擇格式。3D 列印建議使用 STL。",
+    exportDesc: "選擇格式。匯出已開啟的模型網格，不是整個畫面；DXF 不包含地圖影像、文字標籤或 GIS 疊圖。3D 列印建議使用 STL。",
     download: "下載",
 
     // Building info
@@ -287,14 +323,21 @@ const dict = {
     gpxElevGain: "累計爬升",
     gpxElevRange: "海拔範圍",
     gpxSettings: "模型設定",
+    gpxHideSettings: "收合設定",
+    gpxShowSettings: "展開設定",
     gpxExaggeration: "高程放大倍率",
     gpxTrackWidth: "軌跡寬度",
     gpxBaseHeight: "底板厚度",
     gpxBack: "返回",
     gpxExportStl: "匯出 STL（3D 列印）",
-    gpxParseError: "GPX 檔案解析失敗，請確認檔案格式。",
+    gpxParseError: "GPX/XML 或點數值無效。請用有限的 WGS84 十進位座標，海拔限 -12,000 至 10,000 米。",
     gpxNoPoints: "這個 GPX 檔案裡找不到軌跡點。",
-    gpxTooLarge: "檔案太大（上限 50 MB）。",
+    gpxTooLarge: "請選非空的 UTF-8 GPX 檔案，上限 10 MB。",
+    gpxPointLimit: "GPX 超過 50,000 個原始點，請先分段或簡化。",
+    gpxDisconnected: "只支援一個連續軌跡段或一條路線。請先拆分多軌跡／段落／路線，不會自動連接缺口。",
+    gpxNoExtent: "軌跡沒有可用的水平範圍或跨越換日線，請先準備局部連續軌跡。",
+    gpxPartialElevation: "部分點缺少海拔：整個模型先平放，不虛構跌至海平面的落差。補值會替換所有模型點海拔。",
+    gpxSimplified: "模型點已簡化（保留首尾），所示距離／爬升為近似值：",
     gpxNoElevation: "這條軌跡沒有海拔資料，模型會是平的。",
     gpxFillElevation: "用地形資料自動補回海拔",
     gpxFillingElevation: "正在取得海拔資料…",
@@ -314,8 +357,16 @@ const dict = {
     orthoProcessingTitle: "正在取得 3D 場景",
     orthoProcessingDesc: "正在載入此範圍的建築物、道路及地形。載入完成後按「下一步」，即可開啟 3D 城市並放置檢查點。",
     orthoRetry: "重試",
+    orthoDataStatus: "場景資料",
+    orthoNotLoaded: "尚未載入",
+    orthoCellsUnavailable: "個區塊未能載入",
     orthoNoBuildingsHere: "此範圍沒有建築物",
+    orthoTerrainUnavailableHint: "地形高程無法取得或不完整。目前只用平坦參考地面，並非成功取得 0 米 DEM；可重試或不使用地形繼續。",
     orthoCellsPartial: "部分範圍",
+    buildingHippedFlat: "個四坡屋頂建築部分暫以平頂顯示：需要無洞四角矩形、對齊方向，以及有效 roof:height、roof:levels 或 roof:angle（0至小於90°）。",
+    buildingPyramidalFlat: "個金字塔屋頂建築部分暫以平頂顯示：需要無洞凸外框及明確 roof:height 或 roof:levels；不支援僅有 roof:angle。",
+    buildingSkillionFlat: "個單坡建築輪廓因缺少有效的下坡 roof:direction，暫以平頂顯示。",
+    buildingGeometrySkipped: "個 OSM 建築物件已略過：輪廓或垂直高度不完整／暫不支援；不會以填滿外框代替。",
     orthoSomeCellsFailed: "部分範圍未能載入 — 其餘部分可以正常使用。",
     orthoDrawnPartial: "只顯示部分",
     orthoReadyFor3d: "已準備好 — 按「下一步」開啟 3D 場景並放置檢查點。",
@@ -377,10 +428,14 @@ const dict = {
     orthoShowBuildings: "建築物",
     orthoShowRoads: "道路",
     orthoShowTerrain: "地形",
+    orthoTerrainFlatHint: "關閉地形會壓平地面，不會從畫面或模型匯出中移除地面。",
     orthoShowGrid: "1 公里方格",
+    orthoShowContours: "等高線 · 10 米",
+    orthoShowHillshade: "地形陰影",
     orthoShowRoute: "路線連線",
     orthoExaggeration: "地形高度",
     orthoNorth: "北",
+    orthoCamera: "相機控制",
     orthoRecenter: "重設視角",
     orthoTopView: "俯視",
     orthoTiltView: "斜視",
@@ -442,6 +497,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     if (saved === "en" || saved === "zh") return saved;
     return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
   });
+
+  useEffect(() => { document.documentElement.lang = lang === "zh" ? "zh-Hant" : "en"; }, [lang]);
 
   const t = useCallback((key: TranslationKey) => dict[lang][key], [lang]);
 

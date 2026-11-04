@@ -1,0 +1,7 @@
+# Test-only independent CAD reader/auditor; not application/server dependencies.
+# Python 3.11. Reviewed on 2026-11-03. Install in a venv, not the application bundle.
+ezdxf==1.4.5
+fonttools==4.68.0
+numpy==2.4.6
+pyparsing==3.3.3
+typing_extensions==4.16.0

@@ -25,13 +25,15 @@ import {
   controlKindLabel,
   controlSymbol,
   courseStats,
-  courseToJson,
   orderedControls,
   type CourseControl,
 } from "@/utils/course";
 import { formatDeg, gridRefs, parseGridInput } from "@/utils/hkgeo";
 import { downloadBlob } from "@/utils/exporters";
 import { buildShareUrl } from "@/utils/shareLink";
+import { useCourseImport } from "@/hooks/useCourseImport";
+import { DraftStatus } from "./DraftStatus";
+import { CourseLimitsStatus } from "./CourseLimitsStatus";
 import { fmtLength } from "@/utils/measure";
 
 export function CoursePanel() {
@@ -51,6 +53,7 @@ export function CoursePanel() {
   const [tab, setTab] = useState<"controls" | "scene">("controls");
   const [importError, setImportError] = useState(false);
   const readOnly = useCourseStore((state) => state.readOnly);
+  const importCourseFile = useCourseImport(!readOnly, setImportError);
   const canUndo = useCourseStore((state) => state.past.length > 0);
   const canRedo = useCourseStore((state) => state.future.length > 0);
   const area = useCourseStore((state) => state.area);
@@ -92,12 +95,14 @@ export function CoursePanel() {
   return (
     <BottomSheet
       ariaLabel={t("modeOrtho")}
-      peekHeight={188}
+      peekHeight={220}
       desktopWidth={360}
       snap={snap}
       onSnapChange={setPanelSnap}
       header={
         <div css={css({ display: "flex", flexDirection: "column", gap: "8px" })}>
+          <DraftStatus />
+          <CourseLimitsStatus />
           {readOnly ? (
             <div css={css({ display: "flex", flexDirection: "column", gap: "4px" })}>
               <div
@@ -113,7 +118,9 @@ export function CoursePanel() {
                 <Eye css={css({ width: "14px", height: "14px" })} />
                 {t("orthoPlayerBadge")}
               </div>
-              <div css={css({ fontSize: "15px", fontWeight: 700, color: "#202124" })}>
+              <div title={course.name} css={css({ fontSize: "15px", fontWeight: 700, color: "#202124",
+                overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical", overflow: "hidden" })}>
                 {course.name || t("orthoTitle")}
               </div>
               <p css={css({ margin: 0, fontSize: "12px", color: "#5f6368" })}>{t("orthoPlayerHint")}</p>
@@ -281,12 +288,13 @@ export function CoursePanel() {
             </TapButton>
             )}
             <TapButton
-              onClick={() =>
-                downloadBlob(
-                  new Blob([courseToJson(course)], { type: "application/json" }),
+              onClick={() => {
+                const text = useCourseStore.getState().exportCourseJson();
+                if (text !== null) downloadBlob(
+                  new Blob([text], { type: "application/json" }),
                   `${(course.name || "course").replace(/[^\w\u4e00-\u9fff-]+/g, "-")}.json`,
-                )
-              }
+                );
+              }}
             >
               <Download css={css({ width: "16px", height: "16px" })} />
               {t("orthoExport")}
@@ -300,6 +308,12 @@ export function CoursePanel() {
             >
               <Upload css={css({ width: "16px", height: "16px" })} />
               {t("orthoExportModel")}
+            </TapButton>
+            <TapButton onClick={() => useExportStore.getState().requestExport(
+              "dxf", (course.name || "course").replace(/[^\w\u4e00-\u9fff-]+/g, "-"),
+            )}>
+              <Download css={css({ width: "16px", height: "16px" })} />
+              DXF · R2010
             </TapButton>
             {!readOnly && (
             <TapButton
@@ -368,13 +382,7 @@ export function CoursePanel() {
               const file = event.target.files?.[0];
               event.target.value = "";
               if (!file) return;
-              try {
-                useCourseStore.getState().importCourse(await file.text());
-                setImportError(false);
-              } catch (err) {
-                console.warn("[map3d] course import failed:", err);
-                setImportError(true);
-              }
+              await importCourseFile(file);
             }}
           />
         </div>
@@ -535,6 +543,8 @@ function ControlEditor({ control }: { control: CourseControl }) {
 
   const field = css({
     width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
     height: "38px",
     padding: "0 10px",
     borderRadius: "10px",
@@ -549,7 +559,7 @@ function ControlEditor({ control }: { control: CourseControl }) {
   const label = css({ fontSize: "11.5px", fontWeight: 600, color: "#5f6368" });
 
   return (
-    <div
+    <div data-course-editor=""
       css={css({
         border: "1px solid #d7e5fb",
         backgroundColor: "#f7fbff",

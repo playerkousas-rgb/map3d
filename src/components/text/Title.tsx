@@ -1,9 +1,9 @@
 import { css } from "@emotion/react";
 import { SUBTITLE_COLOR } from "@/theme/color";
 
-export function Title({ children }: { children?: React.ReactNode }) {
+export function Title({ children, as: Tag = "h2" }: { children?: React.ReactNode; as?: "h1" | "h2" }) {
   return (
-    <p
+    <Tag
       css={css({
         margin: 0,
         color: SUBTITLE_COLOR,
@@ -12,6 +12,6 @@ export function Title({ children }: { children?: React.ReactNode }) {
       })}
     >
       {children}
-    </p>
+    </Tag>
   );
 }

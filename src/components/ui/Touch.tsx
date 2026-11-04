@@ -98,11 +98,11 @@ export function RoundButton({ children, ...rest }: BaseProps) {
 export function InfoPill({
   children,
   tone = "default",
-  css: extra,
+  className,
 }: {
   children: ReactNode;
   tone?: "default" | "warn" | "error" | "ok";
-  css?: ReturnType<typeof css>;
+  className?: string;
 }) {
   const colors = {
     default: { background: "#ffffffeb", color: "#3c4043", border: "#eceef1" },
@@ -112,6 +112,7 @@ export function InfoPill({
   }[tone];
   return (
     <div
+      className={className}
       css={[
         css({
           display: "flex",
@@ -128,7 +129,6 @@ export function InfoPill({
           fontWeight: 500,
           maxWidth: "min(92vw, 520px)",
         }),
-        extra ?? css({}),
       ]}
     >
       {children}

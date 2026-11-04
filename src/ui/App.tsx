@@ -1,3 +1,6 @@
+import { ModelViewControls } from "@/components/ModelViewControls";
+import type { ViewCommand, ViewCommandKind } from "@/state/viewStore";
+import { APP_VERSION, APP_COPYRIGHT } from "@/config/app";
 import { css, keyframes } from "@emotion/react";
 import { Space } from "../three/Space";
 import { OrthoSpace } from "../three/OrthoSpace";
@@ -6,6 +9,7 @@ import { OrthoOverlay } from "../components/orienteering/OrthoOverlay";
 import { OrthoProcessing } from "../components/orienteering/OrthoProcessing";
 import { isSceneSettled, useSceneStore } from "@/state/sceneStore";
 import { useCourseStore } from "@/state/courseStore";
+import { useDraftLifecycle } from "@/hooks/useDraftLifecycle";
 import { GpxSpace, GpxModelSettings } from "../three/GpxSpace";
 import { FullscreenModal } from "../components/FullscreenModal";
 import { Title } from "@/components/text/Title";
@@ -13,7 +17,7 @@ import { Description } from "@/components/text/Description";
 import { Column } from "@/components/flex/Column";
 import { Row } from "@/components/flex/Row";
 import { MapComponent } from "@/components/map/SelectMap";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   NextButton,
@@ -37,9 +41,13 @@ import { useExportStore } from "@/state/exportStore";
 import { Modal } from "@/components/modal/Modal";
 import { TopNav } from "@/components/nav/TopNav";
 import { useI18n, TranslationKey } from "@/i18n";
-import { parseGpx, GpxTrack } from "@/utils/gpx";
+import { GpxTrack } from "@/utils/gpx";
+import { useGpxImport } from "@/hooks/useGpxImport";
 import { ExportFormat } from "@/utils/exporters";
 import { CellProgress, fetchBuildingElements } from "@/utils/sceneData";
+import { useCourseImport } from "@/hooks/useCourseImport";
+import { DraftStatus } from "@/components/orienteering/DraftStatus";
+import { CourseLimitsStatus } from "@/components/orienteering/CourseLimitsStatus";
 import { fmtSize, measureArea } from "@/utils/measure";
 import { fillTrackElevation, ElevationSource } from "@/utils/elevation";
 import { clearShareToken, decodeShare, readShareToken } from "@/utils/shareLink";
@@ -57,25 +65,28 @@ to { transform: rotate(360deg); }
 type View = "front" | "processing" | "map3d" | "gpx3d" | "orthoProcessing" | "ortho3d";
 type Mode = "map" | "gpx" | "ortho";
 
-/** Refuse absurdly large files before reading them into memory. */
-const MAX_GPX_BYTES = 50 * 1024 * 1024;
-
 const EXPORT_FORMATS: { format: ExportFormat; label: string }[] = [
   { format: "glb", label: "GLB" },
   { format: "gltf", label: "glTF" },
   { format: "obj", label: "OBJ" },
   { format: "stl", label: "STL" },
+  { format: "dxf", label: "DXF · R2010" },
 ];
 
 function App() {
   const { t } = useI18n();
+  useDraftLifecycle();
 
+  const [modelCommand, setModelCommand] = useState<ViewCommand | null>(null);
+  const requestModelView = (kind: ViewCommandKind) => setModelCommand(previous => ({ kind, nonce: (previous?.nonce ?? 0) + 1 }));
   const [mode, setMode] = useState<Mode>("map");
   const [view, setView] = useState<View>("front");
 
   // --- map mode state ---
-  const [isNextButtonDisabled, setIsNextButtonDisabled] = useState(true);
-  const [areaData, setAreaData] = useState<any[]>([]);
+  const [restoredArea] = useState(() => useCourseStore.getState().area);
+  const [isNextButtonDisabled, setIsNextButtonDisabled] = useState(!restoredArea);
+  const [areaData, setAreaData] = useState<any[]>(restoredArea ?? []);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const [isWarnModal, setIsWarnModal] = useState(false);
   const [isExportModal, setIsExportModal] = useState(false);
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -101,45 +112,10 @@ function App() {
   const orthoReadOnly = useCourseStore((state) => state.readOnly);
   const [playLinkInvalid, setPlayLinkInvalid] = useState(false);
 
-  // A player link (#play=…) opens straight into the shared course: load the
-  // scene, then auto-open the 3D view once it has arrived.
-  useEffect(() => {
-    const token = readShareToken();
-    if (!token) return;
-    let cancelled = false;
-    setMode("ortho");
-    setView("orthoProcessing");
-    decodeShare(token)
-      .then(({ area, course }) => {
-        if (cancelled) return;
-        useCourseStore.getState().enterPlayMode(course, area);
-        useSceneStore.getState().load(area);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.warn("[map3d] share link rejected:", err);
-        clearShareToken();
-        setPlayLinkInvalid(true);
-        setView("front");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (view === "orthoProcessing" && orthoReadOnly && orthoSettled) setView("ortho3d");
-  }, [view, orthoReadOnly, orthoSettled]);
-
-  const leavePlayMode = () => {
-    useCourseStore.getState().exitPlayMode();
-    clearShareToken();
-    setView("front");
-  };
-
   // --- gpx mode state ---
   const [gpxTrack, setGpxTrack] = useState<GpxTrack | null>(null);
-  const [gpxError, setGpxError] = useState<string | null>(null);
+  const [gpxError, setGpxError] = useState<TranslationKey | null>(null);
+  const [gpxSettingsOpen, setGpxSettingsOpen] = useState(true);
   const [gpxSettings, setGpxSettings] = useState<GpxModelSettings>({
     exaggeration: 1.5,
     trackWidth: 3,
@@ -154,6 +130,74 @@ function App() {
   const setCenter = useAreaStore((state) => state.setCenter);
   const appendAreas = useAreaStore((state) => state.appendAreas);
   const requestExport = useExportStore((state) => state.requestExport);
+  useEffect(() => {
+    if (restoredArea) setCenter(restoredArea);
+  }, [restoredArea, setCenter]);
+  const [playOpening, setPlayOpening] = useState(false);
+  const importOrthoFile = useCourseImport(mode === "ortho" && view === "front" && !playOpening && !orthoReadOnly, setOrthoError);
+  const leavePlayMode = useCallback(() => {
+    useCourseStore.getState().exitPlayMode();
+    const ownArea = useCourseStore.getState().area;
+    setAreaData(ownArea ?? []);
+    setSelectionRevision(value => value + 1);
+    setIsNextButtonDisabled(!ownArea);
+    if (ownArea) setCenter(ownArea);
+    clearShareToken();
+    setPlayOpening(false);
+    setView("front");
+  }, [setCenter]);
+
+  // Explicit external loads are store events, not derived local state. Subscribe
+  // once so the complete area/map reset is batched with the committed load.
+  useEffect(() => useCourseStore.subscribe((state, previous) => {
+    if (state.draftRevision === previous.draftRevision) return;
+    const ownArea = state.area;
+    setAreaData(ownArea ?? []);
+    setSelectionRevision(value => value + 1);
+    setIsNextButtonDisabled(!ownArea);
+    if (ownArea) setCenter(ownArea);
+    setView("front");
+  }), [setCenter]);
+
+  // Both initial URLs and same-document #play changes must open the course.
+  // Generation guards stop an old decode from replacing a newer link/draft.
+  useEffect(() => {
+    let generation = 0;
+    let hadToken = false;
+    const open = () => {
+      const current = ++generation;
+      const token = readShareToken();
+      if (!token) {
+        if (hadToken || useCourseStore.getState().readOnly) leavePlayMode();
+        hadToken = false;
+        return;
+      }
+      hadToken = true;
+      setPlayOpening(true);
+      setPlayLinkInvalid(false);
+      setMode("ortho");
+      setView("orthoProcessing");
+      decodeShare(token).then(({ area, course }) => {
+        if (current !== generation) return;
+        useCourseStore.getState().enterPlayMode(course, area);
+        useSceneStore.getState().load(area);
+        setPlayOpening(false);
+      }).catch(() => {
+        if (current !== generation) return;
+        leavePlayMode();
+        setPlayLinkInvalid(true);
+      });
+    };
+    open();
+    window.addEventListener("hashchange", open);
+    return () => { generation++; window.removeEventListener("hashchange", open); };
+  }, [leavePlayMode]);
+
+  // Advance before commit instead of first painting an already-finished loader.
+  if (view === "orthoProcessing" && orthoReadOnly && orthoSettled && !playOpening) {
+    setView("ortho3d");
+  }
+
 
   const checkIsBig = () => {
     if (areaData.length < 2) return false;
@@ -170,6 +214,7 @@ function App() {
     setIsNextButtonDisabled(false);
     setBuildings([]);
     setHasFetchedBuildings(false);
+    setBuildingCells({ total: 0, done: 0, failed: 0 });
     setFetchError(null);
   };
 
@@ -178,6 +223,7 @@ function App() {
     setIsNextButtonDisabled(true);
     setBuildings([]);
     setHasFetchedBuildings(false);
+    setBuildingCells({ total: 0, done: 0, failed: 0 });
     setFetchError(null);
   };
 
@@ -276,26 +322,21 @@ function App() {
     setElevSource(null);
   };
 
-  const handleGpxFile = async (file: File) => {
-    setGpxError(null);
-    if (file.size > MAX_GPX_BYTES) {
-      setGpxError(t("gpxTooLarge"));
-      return;
-    }
-    resetElevation();
-    try {
-      const text = await file.text();
-      const track = parseGpx(text);
+  const handleGpxFile = useGpxImport(mode === "gpx" && view === "front" && !playOpening && !orthoReadOnly,
+    track => {
+      resetElevation();
       setGpxTrack(track);
+      setGpxSettingsOpen(true);
       setView("gpx3d");
-    } catch (err) {
-      if (err instanceof Error && err.message === "NO_POINTS") {
-        setGpxError(t("gpxNoPoints"));
-      } else {
-        setGpxError(t("gpxParseError"));
-      }
-    }
-  };
+    },
+    code => {
+      const errors: Record<string, TranslationKey> = {
+        GPX_TOO_LARGE: "gpxTooLarge", NO_POINTS: "gpxNoPoints",
+        GPX_POINT_LIMIT: "gpxPointLimit", GPX_DISCONNECTED: "gpxDisconnected",
+        GPX_NO_EXTENT: "gpxNoExtent",
+      };
+      setGpxError(code === null ? null : errors[code] ?? "gpxParseError");
+    });
 
   const handleFillElevation = async () => {
     if (!gpxTrack || elevLoading) return;
@@ -361,7 +402,7 @@ function App() {
       <FullscreenModal isOpen={view === "front"}>
         <Column gap="1rem">
           <Column gap="0.5rem">
-            <Title>{t("frontTitle")}</Title>
+            <Title as="h1">{t("frontTitle")}</Title>
             <Description>{t("frontDesc")}</Description>
             {mode === "map" && <Steps current={1} />}
             {mode === "ortho" && <Steps current={1} variant="ortho" />}
@@ -397,9 +438,11 @@ function App() {
               } as Parameters<typeof css>[0])}
             >
               <MapComponent
+                key={selectionRevision}
                 onRemove={handleRemove}
                 onDone={handleDone}
-                isActive={view === "front"}
+                isActive={view === "front" && !playOpening && !orthoReadOnly}
+                searchContext={mode}
                 initialArea={
                   areaData.length === 2 ? [areaData[0], areaData[1]] : null
                 }
@@ -408,12 +451,13 @@ function App() {
               {mode === "ortho" && (
                 <Column gap="0.6rem">
                   <Description>{t("orthoStepSelect")}</Description>
+                  <DraftStatus />
+                  <CourseLimitsStatus />
                   <input
                     value={orthoName}
                     onChange={(event) => useCourseStore.getState().setName(event.target.value)}
                     placeholder={t("orthoCourseNamePlaceholder")}
                     aria-label={t("orthoCourseName")}
-                    maxLength={80}
                     css={css({
                       height: "var(--tap)",
                       padding: "0 14px",
@@ -498,13 +542,7 @@ function App() {
                       const file = event.target.files?.[0];
                       event.target.value = "";
                       if (!file) return;
-                      try {
-                        useCourseStore.getState().importCourse(await file.text());
-                        setOrthoError(false);
-                      } catch (err) {
-                        console.warn("[map3d] course import failed:", err);
-                        setOrthoError(true);
-                      }
+                      await importOrthoFile(file);
                     }}
                   />
                 </Column>
@@ -554,10 +592,14 @@ function App() {
                 />
               </div>
               {gpxError && (
-                <div css={css({ color: "#ef4444", fontSize: "13px" })}>{gpxError}</div>
+                <div role="alert" css={css({ color: "#ef4444", fontSize: "13px" })}>{t(gpxError)}</div>
               )}
             </Column>
           )}
+          <footer css={css({ fontSize: "12px", color: "#5a6570", lineHeight: 1.5 })}>
+            <div>{APP_COPYRIGHT} · v{APP_VERSION}</div>
+            <div>{t("mapDataNotice")}</div>
+          </footer>
         </Column>
       </FullscreenModal>
 
@@ -661,7 +703,7 @@ function App() {
       </NextButton>
 
       {/* ---------- 3D scene usage hint ---------- */}
-      {(view === "map3d" || view === "gpx3d") && (
+      {view === "map3d" && (
         <div
           css={css({
             position: "fixed",
@@ -682,18 +724,16 @@ function App() {
             color: "#5f6368",
             pointerEvents: "none",
             maxWidth: "calc(100vw - 2rem)",
-            // On a phone the GPX settings panel takes this corner of the screen.
-            ...(view === "gpx3d" ? { "@media (max-width: 720px)": { display: "none" } } : {}),
           })}
         >
           <Map css={css({ width: "13px", height: "13px", flexShrink: 0 })} />
-          {view === "map3d" ? <Steps current={3} /> : null}
-          <span>{view === "gpx3d" ? t("sceneHintGpx") : t("sceneHint")}</span>
+          <Steps current={3} />
+          <span>{t("sceneHint")}</span>
         </div>
       )}
 
       {/* ---------- Warn modal ---------- */}
-      <Modal isOpen={isWarnModal} onClose={() => setIsWarnModal(false)}>
+      <Modal label={t("tooBigTitle")} isOpen={isWarnModal} onClose={() => setIsWarnModal(false)}>
         <Column gap="0.5rem">
           <Title>{t("tooBigTitle")}</Title>
           {areaData.length === 2 && (
@@ -723,7 +763,7 @@ function App() {
       </Modal>
 
       {/* ---------- Export modal ---------- */}
-      <Modal isOpen={isExportModal} onClose={() => setIsExportModal(false)}>
+      <Modal label={t("exportTitle")} isOpen={isExportModal} onClose={() => setIsExportModal(false)}>
         <Column gap="0.5rem">
           <Title>{t("exportTitle")}</Title>
           <Description>{t("exportDesc")}</Description>
@@ -749,16 +789,29 @@ function App() {
         </Column>
       </Modal>
 
+      {(view === "map3d" || view === "gpx3d") && <ModelViewControls onRequest={kind => {
+        if (view === "gpx3d" && kind === "reset") setGpxSettingsOpen(false);
+        requestModelView(kind);
+      }} />}
+
       {/* ---------- GPX info panel ---------- */}
       {view === "gpx3d" && gpxTrack && (
-        <div
+        <section
+          aria-label={t("gpxSettings")}
+          aria-describedby="gpx-scene-help"
+          tabIndex={0}
+          data-gpx-panel=""
           css={css({
             position: "fixed",
             top: "calc(var(--topnav-h) + 10px)",
             right: "calc(1rem + var(--safe-right))",
             zIndex: 999,
-            width: "260px",
-            maxHeight: "calc(100dvh - var(--topnav-h) - 8rem)",
+            // Include padding in both width and height: short screens must
+            // leave the Back/Export row outside this independently scrolling card.
+            boxSizing: "border-box",
+            width: "292px",
+            maxHeight: "calc(100% - var(--topnav-h) - 9rem - var(--safe-bottom))",
+            overscrollBehavior: "contain",
             overflowY: "auto",
             backgroundColor: "#ffffffdd",
             backdropFilter: "blur(12px)",
@@ -771,13 +824,41 @@ function App() {
               left: "calc(8px + var(--safe-left))",
               right: "calc(8px + var(--safe-right))",
               width: "auto",
-              maxHeight: "48dvh",
+              // The percentage cap follows this fixed card's viewport even
+              // while a browser defers updating dynamic viewport units.
+              maxHeight: "min(48dvh, calc(100% - var(--topnav-h) - 9rem - var(--safe-bottom)))",
             },
           })}
         >
-          <div css={css({ fontWeight: 600, fontSize: "14px", marginBottom: "0.5rem" })}>
+          <button
+            type="button"
+            aria-expanded={gpxSettingsOpen}
+            aria-controls="gpx-settings-body"
+            onClick={() => setGpxSettingsOpen(open => !open)}
+            css={css({
+              width: "100%", minHeight: "var(--tap)", borderRadius: "8px",
+              border: "1px solid #d4dbe0", backgroundColor: "#fff",
+              color: "#166aaa", fontSize: "13px", cursor: "pointer",
+              marginBottom: gpxSettingsOpen ? "0.75rem" : 0,
+            })}
+          >
+            {gpxSettingsOpen ? t("gpxHideSettings") : t("gpxShowSettings")}
+          </button>
+          <div id="gpx-settings-body" hidden={!gpxSettingsOpen}>
+          <div css={css({ fontWeight: 600, fontSize: "14px", marginBottom: "0.5rem", overflowWrap: "anywhere" })}>
             {gpxTrack.stats.name}
           </div>
+
+          {/* In-flow help cannot sit underneath the settings card at tablet
+              widths. It remains scrollable/readable on phones instead of hidden. */}
+          <p id="gpx-scene-help" css={css({
+            display: "flex", alignItems: "flex-start", gap: "0.4rem",
+            color: "#5f6368", fontSize: "12px", lineHeight: "1.5",
+            margin: "0 0 0.75rem",
+          })}>
+            <Map aria-hidden="true" css={css({ width: "14px", height: "14px", flexShrink: 0, marginTop: "2px" })} />
+            <span>{t("sceneHintGpx")}</span>
+          </p>
 
           <div css={css({ color: "#5f6368", marginBottom: "0.75rem" })}>
             <StatRow label={t("gpxPoints")} value={String(gpxTrack.stats.pointCount)} />
@@ -788,6 +869,12 @@ function App() {
               value={`${gpxTrack.stats.minEle} ~ ${gpxTrack.stats.maxEle} m`}
             />
           </div>
+
+          {gpxTrack.sourcePointCount > gpxTrack.points.length && (
+            <p role="status" css={css({ color: "#8a5a00", fontSize: "12px", lineHeight: 1.5 })}>
+              {t("gpxSimplified")} {gpxTrack.sourcePointCount} → {gpxTrack.points.length}
+            </p>
+          )}
 
           {!gpxTrack.stats.hasElevation && (
             <div
@@ -800,9 +887,10 @@ function App() {
                 fontSize: "12px",
               })}
             >
-              <div css={css({ marginBottom: "0.5rem" })}>{t("gpxNoElevation")}</div>
+              <div css={css({ marginBottom: "0.5rem" })}>{t(gpxTrack.missingElevationCount < gpxTrack.sourcePointCount ? "gpxPartialElevation" : "gpxNoElevation")}</div>
               <button
                 css={css({
+                  minHeight: "var(--tap)",
                   width: "100%",
                   display: "flex",
                   alignItems: "center",
@@ -879,6 +967,7 @@ function App() {
 
           <button
             css={css({
+              minHeight: "var(--tap)",
               width: "100%",
               marginTop: "0.75rem",
               display: "flex",
@@ -900,7 +989,8 @@ function App() {
           >
             <Printer css={IconSize} /> {t("gpxExportStl")}
           </button>
-        </div>
+          </div>
+        </section>
       )}
 
       {/* ---------- 3D scenes ---------- */}
@@ -911,10 +1001,10 @@ function App() {
           <CoursePanel />
         </>
       ) : view === "gpx3d" && gpxTrack ? (
-        <GpxSpace points={gpxTrack.points} settings={gpxSettings} />
-      ) : (
-        <Space />
-      )}
+        <GpxSpace points={gpxTrack.points} settings={gpxSettings} command={modelCommand} />
+      ) : view === "map3d" ? (
+        <Space command={modelCommand} />
+      ) : null}
     </div>
   );
 }
@@ -960,11 +1050,13 @@ function SettingSlider({
       </div>
       <input
         type="range"
+        aria-label={label}
+        aria-valuetext={display}
         min={min}
         max={max}
         step={step}
         value={value}
-        css={css({ width: "100%" })}
+        css={css({ width: "100%", minHeight: "var(--tap)", margin: 0, boxSizing: "border-box" })}
         onChange={(e) => onChange(parseFloat(e.target.value))}
       />
     </div>

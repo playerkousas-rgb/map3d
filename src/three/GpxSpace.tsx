@@ -1,11 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { ModelCameraRig } from "./ModelCameraRig";
+import type { ViewCommand } from "@/state/viewStore";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { GpxPoint } from "@/utils/gpx";
 import { ExportListener } from "./ExportListener";
-import { SafeEnvironment } from "./SafeEnvironment";
 
 export interface GpxModelSettings {
   /** vertical exaggeration multiplier for elevation */
@@ -150,38 +151,42 @@ function useGpxGeometry(points: GpxPoint[], settings: GpxModelSettings) {
 export function GpxSpace({
   points,
   settings,
+  command = null,
 }: {
   points: GpxPoint[];
   settings: GpxModelSettings;
+  command?: ViewCommand | null;
 }) {
   const geo = useGpxGeometry(points, settings);
+  useEffect(() => () => {
+    geo?.track?.dispose(); geo?.base.dispose(); geo?.startMarker.dispose(); geo?.endMarker.dispose();
+  }, [geo]);
   if (!geo) return null;
 
-  const camDist = geo.size * 0.9;
 
   return (
-    <Canvas camera={{ fov: 55, near: 0.1, far: 5000, position: [camDist, camDist * 0.8, camDist] }}>
+    <Canvas camera={{ fov: 55, near: 0.1, far: 5000 }}>
       <ambientLight intensity={0.9} />
       <directionalLight position={[80, 150, 80]} intensity={1.4} />
       <directionalLight position={[-60, 60, -60]} intensity={0.4} color="#aab8ff" />
 
-      <mesh geometry={geo.base} userData={{ exportable: true }}>
+      <mesh geometry={geo.base} userData={{ exportable: true, dxfUnitScale: 0.001 }}>
         <meshStandardMaterial color="#e8e4da" roughness={0.85} metalness={0.05} />
       </mesh>
-      <mesh geometry={geo.track} userData={{ exportable: true }}>
+      <mesh geometry={geo.track} userData={{ exportable: true, dxfUnitScale: 0.001 }}>
         <meshStandardMaterial color="#e05d38" roughness={0.6} metalness={0.1} />
       </mesh>
-      <mesh geometry={geo.startMarker} userData={{ exportable: true }}>
+      <mesh geometry={geo.startMarker} userData={{ exportable: true, dxfUnitScale: 0.001 }}>
         <meshStandardMaterial color="#2fa860" roughness={0.6} />
       </mesh>
-      <mesh geometry={geo.endMarker} userData={{ exportable: true }}>
+      <mesh geometry={geo.endMarker} userData={{ exportable: true, dxfUnitScale: 0.001 }}>
         <meshStandardMaterial color="#3565d4" roughness={0.6} />
       </mesh>
 
-      <OrbitControls />
+      <OrbitControls makeDefault />
+      <ModelCameraRig command={command} revision={geo} />
       <ExportListener />
       <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
-      <SafeEnvironment preset="city" />
     </Canvas>
   );
 }

@@ -1,8 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   MapContainer,
   Rectangle,
-  TileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
@@ -12,6 +11,8 @@ import { css } from "@emotion/react";
 import { CircleMinus, MousePointerClick, Ruler } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { MapSearch } from "./MapSearch";
+import { DataSourceControls, DataSourceLayers, type SourceStatus } from "./DataSources";
+import { LocalGeoJsonControls, LocalGeoJsonLayer, type LocalOverlay } from "./LocalGeoJson";
 import { AreaSize, fmtSize, measureArea } from "@/utils/measure";
 
 const IconSize = css({
@@ -23,7 +24,10 @@ const IconSize = css({
 function ScaleBar() {
   const map = useMap();
   useEffect(() => {
-    const control = L.control.scale({ metric: true, imperial: false, position: "bottomleft" });
+    // Share Leaflet's bottom-right stack with attribution. Control.addTo()
+    // inserts bottom controls before existing children; clear:both in Leaflet's
+    // own CSS keeps the scale above even multi-line credits, without measuring.
+    const control = L.control.scale({ metric: true, imperial: false, position: "bottomright" });
     control.addTo(map);
     return () => {
       control.remove();
@@ -42,7 +46,6 @@ const LEVEL_COLOR: Record<AreaSize["level"], string> = {
 function RectangleSelector({
   isDrag = true,
 
-  bounds,
   drawBounds,
   level = "ok",
 
@@ -51,7 +54,6 @@ function RectangleSelector({
 }: {
   isDrag: boolean;
 
-  bounds: LatLngBounds | null;
   drawBounds: LatLngBounds | null;
   /** size verdict — tints the rectangle so oversized selections stand out */
   level?: AreaSize["level"];
@@ -115,7 +117,7 @@ function RectangleSelector({
       }
     };
 
-    const handleTouchEnd = (e: TouchEvent) => {
+    const handleTouchEnd = () => {
       if (firstPoint) {
         const latlng = lastLatlngRef.current || firstPoint;
 
@@ -134,7 +136,7 @@ function RectangleSelector({
       container.removeEventListener("touchmove", handleTouchMove);
       container.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [map, isDrag, firstPoint, onChange]);
+  }, [map, isDrag, firstPoint, onChange, onDrawChange]);
 
   useEffect(() => {
     if (map) {
@@ -152,15 +154,19 @@ export function MapComponent({
   onRemove,
   isActive = true,
   initialArea = null,
+  searchContext = "map",
 }: {
   onDone: (e) => void;
   onRemove: () => void;
   /** true while the parent fullscreen view is visible (Leaflet needs a nudge after display:none) */
   isActive?: boolean;
+  /** Changing mode resets search only, not the map/layers/selected area. */
+  searchContext?: string;
   /** previous selection (northEast, southWest) so a remounted map still shows the rectangle */
   initialArea?: [any, any] | null;
 }) {
   const { t } = useI18n();
+  const hintId = useId();
   const [isDrag, setIsDrag] = useState(true);
   const [bounds, setBounds] = useState<LatLngBounds | null>(
     initialArea ? new LatLngBounds(initialArea[0], initialArea[1]) : null,
@@ -169,6 +175,13 @@ export function MapComponent({
     initialArea ? new LatLngBounds(initialArea[0], initialArea[1]) : null,
   );
   const [map, setMap] = useState<L.Map | null>(null);
+  const [localOverlay, setLocalOverlay] = useState<LocalOverlay | null>(null);
+  const [sources, setSources] = useState<string[]>(["osm"]);
+  const [sourceStatuses, setSourceStatuses] = useState<Record<string, SourceStatus>>({});
+  const [sourceRetries, setSourceRetries] = useState<Record<string, number>>({});
+  const reportSource = useCallback((id: string, status: SourceStatus) => {
+    setSourceStatuses(prev => prev[id] === status ? prev : { ...prev, [id]: status });
+  }, []);
 
   const handleClickSwitchDrag = () => {
     setIsDrag(!isDrag);
@@ -184,7 +197,9 @@ export function MapComponent({
     const id = window.setTimeout(() => {
       try {
         map.invalidateSize();
-        if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+        // Restoration is not a user pan: do not leave a zoom animation running
+        // across a rapid player-link remount of this map.
+        if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18, animate: false });
       } catch {
         /* map container may already be gone during unmount */
       }
@@ -218,6 +233,7 @@ export function MapComponent({
   };
 
   return (
+    <>
     <div
       css={css({
         position: "relative",
@@ -281,28 +297,60 @@ export function MapComponent({
               backgroundColor: isDrag ? "#085fbd" : "#ebeef0c2",
             },
           })}
+          aria-describedby={hintId}
           onClick={handleClickSwitchDrag}
         >
           {isDrag ? <SelectBox /> : t("backToDrag")}
         </button>
       </div>
 
-      <MapSearch map={map} />
+      {isActive && <MapSearch key={searchContext} map={map} />}
 
+      <MapContainer
+        // Leaflet 1.9.4 leaves a 250ms zoom-transition callback after remove().
+        // This map is keyed/remounted on player exit: instant zoom avoids that
+        // stale callback without patching private Leaflet methods or swallowing errors.
+        zoomAnimation={false}
+        ref={setMap}
+        center={initialArea ? undefined : [22.32, 114.17]}
+        bounds={initialArea ? new LatLngBounds(initialArea[0], initialArea[1]) : undefined}
+        zoom={13}
+        style={{
+          // --map-h shortens on phones so the map, the search box and the
+          // buttons below it all fit on one screen.
+          height: "var(--map-h)",
+          width: "100%",
+          borderRadius: "12px",
+        }}
+      >
+        <DataSourceLayers selected={sources} retries={sourceRetries} onStatus={reportSource} />
+        <LocalGeoJsonLayer overlay={localOverlay} />
+        <ScaleBar />
+        <RectangleSelector
+          drawBounds={drawBounds}
+          level={level}
+          isDrag={isDrag}
+          onChange={handleChangeDone}
+          onDrawChange={handleChangeDraw}
+        />
+      </MapContainer>
       {/* Step-by-step hint + live measurement so users know the scale
           of what they are circling (and before a query can time out) */}
       <div
+        id={hintId}
+        data-selection-hint
         css={css({
-          position: "absolute",
-          zIndex: 9998,
-          bottom: "1rem",
-          left: "50%",
-          transform: "translateX(-50%)",
+          // Normal flow keeps guidance clear of dynamic Leaflet credits.
+          width: "fit-content",
+          boxSizing: "border-box",
+          margin: "0.5rem auto 0",
           display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
           alignItems: "center",
           gap: "0.5rem",
           padding: "0.5rem 0.9rem",
-          borderRadius: "999px",
+          borderRadius: "12px",
           backgroundColor: !bounds
             ? "#ffffffee"
             : level === "big"
@@ -329,9 +377,10 @@ export function MapComponent({
                 : "#1e8e3e",
           fontWeight: 500,
           pointerEvents: "none",
-          maxWidth: "calc(100% - 2rem)",
+          maxWidth: "100%",
+          overflowWrap: "anywhere",
           textAlign: "center",
-          transition: "0.2s",
+
         })}
       >
         <MousePointerClick css={css({ width: "14px", height: "14px", flexShrink: 0 })} />
@@ -360,33 +409,16 @@ export function MapComponent({
         )}
       </div>
 
-      <MapContainer
-        ref={setMap}
-        center={[22.32, 114.17]}
-        zoom={13}
-        style={{
-          // --map-h shortens on phones so the map, the search box and the
-          // buttons below it all fit on one screen.
-          height: "var(--map-h)",
-          width: "100%",
-          borderRadius: "12px",
-        }}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        <ScaleBar />
-        <RectangleSelector
-          bounds={bounds}
-          drawBounds={drawBounds}
-          level={level}
-          isDrag={isDrag}
-          onChange={handleChangeDone}
-          onDrawChange={handleChangeDraw}
-        />
-      </MapContainer>
     </div>
+    <DataSourceControls selected={sources} statuses={sourceStatuses} onSelect={setSources}
+      onRetry={id => setSourceRetries(prev => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }))}>
+      <LocalGeoJsonControls overlay={localOverlay} onChange={setLocalOverlay} onFit={() => {
+        if (!map || !localOverlay) return;
+        map.fitBounds(localOverlay.bounds, { padding: [24, 24], maxZoom: 15, animate: false });
+        map.getContainer().scrollIntoView({ block: "center" });
+      }} />
+    </DataSourceControls>
+    </>
   );
 }
 
