@@ -9,6 +9,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { ExportListener } from "./ExportListener";
 import { normalizeBBox, overpassQuery } from "@/utils/overpass";
 import { mapBuildingShape, mapBuildingGeometry } from "./mapBuildingGeometry";
+import { buildingDimensions, needsSkillionDirectionFallback } from "@/utils/builders/buildingBuilder";
 import { useI18n } from "@/i18n";
 
 const scale = 51000;
@@ -97,6 +98,7 @@ function Building({
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [showTranslations, setShowTranslations] = useState(false);
   const [showAdditionalInfo, setShowAdditionalInfo] = useState(false);
+  const [showHeightDetails, setShowHeightDetails] = useState(false);
 
   const { wall, roof } = useMemo(() => buildingColors(id, tags), [id, tags]);
   const active = hovered || clicked;
@@ -197,6 +199,85 @@ function Building({
                   </div>
                 )
             )}
+            {/* Height & roof breakdown — honest about estimated vs tagged heights and partial LoD2 */}
+            {(() => {
+              const dims = buildingDimensions(tags, 10, 12);
+              const hasRoof = !!tags["roof:shape"];
+              const needsDir = needsSkillionDirectionFallback(tags);
+              const heightSource = tags.height ? "tagged" : tags["building:levels"] ? "levels" : "estimated";
+              return (
+                <div
+                  style={{
+                    margin: "10px 0 8px",
+                    borderTop: "1px solid rgba(0, 0, 0, 0.08)",
+                    paddingTop: "8px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: "500",
+                      marginBottom: "4px",
+                      color: "#5f6368",
+                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                    onClick={() => setShowHeightDetails(!showHeightDetails)}
+                  >
+                    {t("buildingHeightDetails")}
+                    <span>{showHeightDetails ? "▲" : "▼"}</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#5f6368", marginBottom: showHeightDetails ? "6px" : 0 }}>
+                    {dims.totalHeight.toFixed(1)} m {t("buildingTotalHeight")} · {dims.eavesHeight.toFixed(1)} m {t("buildingEavesHeight")} · {heightSource === "tagged" ? "✓" : heightSource === "levels" ? "≈" : "~"} {t(heightSource === "tagged" ? "buildingHeightTagged" : heightSource === "levels" ? "buildingHeightFromLevels" : "buildingHeightEstimated")}
+                  </div>
+                  {showHeightDetails && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "3px", fontSize: "12px" }}>
+                      {[
+                        ["roof:shape", tags["roof:shape"]],
+                        ["roof:height", tags["roof:height"]],
+                        ["roof:levels", tags["roof:levels"]],
+                        ["roof:angle", tags["roof:angle"] ? `${tags["roof:angle"]}°` : undefined],
+                        ["roof:direction", tags["roof:direction"]],
+                        ["roof:ridge:direction", tags["roof:ridge:direction"]],
+                        ["roof:orientation", tags["roof:orientation"]],
+                        ["roof:material", tags["roof:material"]],
+                        ["building:material", tags["building:material"]],
+                        ["min_height", tags["min_height"] ?? tags.min_height],
+                        ["building:min_level", tags["building:min_level"]],
+                      ]
+                        .filter(([, v]) => v !== undefined && v !== "")
+                        .map(([k, v]) => (
+                          <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ fontWeight: "500", color: "#5f6368" }}>{k}:</span>
+                            <span style={{ textAlign: "right", maxWidth: "110px", overflowWrap: "anywhere" }}>{String(v)}</span>
+                          </div>
+                        ))}
+                      {hasRoof && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontWeight: "500", color: "#5f6368" }}>{t("buildingRoofRise")}:</span>
+                          <span>{dims.roofHeight.toFixed(1)} m</span>
+                        </div>
+                      )}
+                      {tags["building:levels"] && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontWeight: "500", color: "#5f6368" }}>{t("tagLevels")}:</span>
+                          <span>{tags["building:levels"]}</span>
+                        </div>
+                      )}
+                      {needsDir && (
+                        <div style={{ color: "#b06000", fontSize: "11px", marginTop: "4px", backgroundColor: "#fff7e6", padding: "4px 6px", borderRadius: "4px" }}>
+                          {t("buildingSkillionFlat")}
+                        </div>
+                      )}
+                      {!hasRoof && dims.roofHeight === 0 && (
+                        <div style={{ color: "#80868b", fontSize: "11px" }}>{t("buildingFlatRoofHint")}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {[
               "addr:street",
               "addr:housenumber",
